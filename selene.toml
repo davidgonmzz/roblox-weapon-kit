@@ -1,0 +1,7 @@
+# Run `selene generate-roblox-std` once to create roblox.yml, then `selene src`.
+std = "roblox"
+exclude = ["src/server/Vendor/**", "third_party/**", "tests/**"]
+
+[lints]
+# ProfileStore and similar vendored modules trip these; our own code avoids them.
+mixed_table = "warn"

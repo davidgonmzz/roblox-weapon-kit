@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools (Rokit)
+        uses: CompeyDev/setup-rokit@v0.2.1
+
+      - name: Format check (StyLua)
+        run: stylua --check src
+
+      - name: Lint (Selene)
+        run: |
+          selene generate-roblox-std
+          selene src
+
+      - name: Tests (mock-world harness)
+        run: |
+          python3 tests/build.py
+          luau tests/server_test.luau | tee result.txt
+          grep -q ", 0 failed" result.txt

@@ -1,0 +1,10 @@
+# Keep Luau and text sources LF across platforms (matches stylua.toml line_endings = "Unix").
+* text=auto eol=lf
+*.luau text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.png binary
+*.rbxm binary
+*.rbxmx binary

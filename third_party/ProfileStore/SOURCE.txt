@@ -1,0 +1,6 @@
+ProfileStore v1.0.3 by MadStudioRoblox (loleris), Apache-2.0
+Source: https://github.com/MadStudioRoblox/ProfileStore commit 9580f7c59cd3c04808e43c92e24b9afaefba679b (2025-03-25)
+Downloaded 2026-10-09 with user OK.
+sha256 ProfileStore.luau ad43737203688b8e88cab34ebe8c483000c157e53bfb41e35f1b49ee89d0c95f
+sha256 LICENSE c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
+Copied byte-for-byte to src/server/Vendor/ProfileStore.luau (2026-10-09); keep the two identical.
