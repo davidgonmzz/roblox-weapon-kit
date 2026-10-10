@@ -54,6 +54,7 @@ local Weapons = require(Shared:WaitForChild("Weapons"))
 local AimStats = require(script.Parent.AimStats)
 local PlayerData = require(script.Parent.PlayerData)
 local RateLimit = require(script.Parent.RateLimit)
+local Remotes = require(script.Parent.Remotes)
 local Suspicion = require(script.Parent.Suspicion)
 
 local WeaponServer = {}
@@ -66,20 +67,11 @@ local MAX_DIRECTION = 1e4 -- the client sends a unit vector; anything longer tha
 local MAX_SHOT_ID = 2 ^ 31
 local POINT_BLANK = 0.25 -- studs: a muzzle this close to (or inside) a hitbox counts as a hit
 
-local remotes = ReplicatedStorage:FindFirstChild("Remotes") or Instance.new("Folder")
-remotes.Name = "Remotes"
-remotes.Parent = ReplicatedStorage
-local function remote(name: string): RemoteEvent
-	local r = remotes:FindFirstChild(name) or Instance.new("RemoteEvent")
-	r.Name = name
-	r.Parent = remotes
-	return r
-end
-local fireRemote = remote("Fire")
-local reloadRemote = remote("Reload")
-local ammoRemote = remote("AmmoSync")
-local fxRemote = remote("FireFX")
-local hitRemote = remote("HitConfirm")
+local fireRemote = Remotes.event("Fire")
+local reloadRemote = Remotes.event("Reload")
+local ammoRemote = Remotes.event("AmmoSync")
+local fxRemote = Remotes.event("FireFX")
+local hitRemote = Remotes.event("HitConfirm")
 
 -- Flood guards only: the real fire-rate rule is the interval check in onFire. Human limit is
 -- ~10 shots/s (rifle, 600 rpm); a burst of 14 absorbs a lag spike delivering shots together.
@@ -163,22 +155,10 @@ local function holder(player: Player)
 	return nil
 end
 
--- Characters that bullets and the point-blank query must ignore: always the shooter's own;
--- with PVP off, every player's (bullets pass through, only dummies take damage).
+-- Characters that bullets and the point-blank query must ignore (the rule is in shared/Ballistics,
+-- so the client's aim ray uses the same one).
 local function ignoreList(shooter: Player)
-	local list = {}
-	if Config.PVP then
-		if shooter.Character then
-			table.insert(list, shooter.Character)
-		end
-	else
-		for _, p in Players:GetPlayers() do
-			if p.Character then
-				table.insert(list, p.Character)
-			end
-		end
-	end
-	return list
+	return Ballistics.ignoredCharacters(Players:GetPlayers(), shooter, Config.PVP)
 end
 
 -- The Model with a Humanoid that `inst` is, or sits inside (a limb, an accessory handle, ...).

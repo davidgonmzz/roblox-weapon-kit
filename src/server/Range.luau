@@ -283,8 +283,10 @@ local function buildCrate(folder: Folder)
 		if now - (lastUse[player] or -math.huge) < Config.CRATE_COOLDOWN then
 			return
 		end
-		lastUse[player] = now
-		WeaponServer.restock(player)
+		-- Only a refill starts the cooldown: restock does nothing until the player's data has loaded.
+		if WeaponServer.restock(player) then
+			lastUse[player] = now
+		end
 	end)
 	Players.PlayerRemoving:Connect(function(player)
 		lastUse[player] = nil

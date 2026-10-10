@@ -10,8 +10,10 @@ root = os.path.join(here, "..", "src")
 srcs = {
     "shared/Config": "shared/Config.luau",
     "shared/Weapons": "shared/Weapons.luau",
+    "shared/Ballistics": "shared/Ballistics.luau",
     "server/PlayerData": "server/PlayerData.luau",
     "server/RateLimit": "server/RateLimit.luau",
+    "server/Remotes": "server/Remotes.luau",
     "server/Suspicion": "server/Suspicion.luau",
     "server/AimStats": "server/AimStats.luau",
     "server/Movement": "server/Movement.luau",

@@ -173,6 +173,6 @@ Record at 1080p. Hide the Studio panels (run the game in a client window, or use
 | 0:58 - 1:03 | Cut to Output: the `25 suspicious requests` warning line | Optional, 3 s |
 | 1:03 - 1:13 | Ammo and saving: show the reserve low, press E at the crate to refill; then (published place) stop, play again and show the reserve and loadout kept | If saving isn't set up, skip the rejoin and keep the crate only |
 | 1:13 - 1:23 | Code peek: `Weapons.luau` with the Smg example added, press 4 and shoot it | Proves "a new weapon is one entry" |
-| 1:23 - 1:30 | End card: prices, `<Discord>`, the line "AI-assisted tooling; all code reviewed and tested by me." | Same text as the README |
+| 1:23 - 1:30 | End card: prices, Discord `imbetter0597`, the line "AI-assisted tooling; all code reviewed and tested by me." | Same text as the README |
 
 Trim to 60 s by dropping the Output cut, the code peek, the rejoin and the new lab rows.

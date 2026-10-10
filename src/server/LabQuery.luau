@@ -15,6 +15,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local RateLimit = require(script.Parent.RateLimit)
+local Remotes = require(script.Parent.Remotes)
 
 local LabQuery = {}
 
@@ -44,12 +45,7 @@ function LabQuery.init()
 	if not Config.DEMO_CHEAT_PANEL then
 		return
 	end
-	local remotes = ReplicatedStorage:FindFirstChild("Remotes") or Instance.new("Folder")
-	remotes.Name = "Remotes"
-	remotes.Parent = ReplicatedStorage
-	local query = remotes:FindFirstChild("LabQuery") or Instance.new("RemoteFunction")
-	query.Name = "LabQuery"
-	query.Parent = remotes
+	local query = Remotes.func("LabQuery")
 	-- Whatever the caller passes is ignored: there is nothing to parse, so nothing to break.
 	query.OnServerInvoke = function(player)
 		if not queryLimit:allow(player) then

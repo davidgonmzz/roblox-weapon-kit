@@ -281,11 +281,13 @@ end
 local shared = child(ReplicatedStorage, new("Folder", "Shared"))
 child(shared, module("Config", "shared/Config"))
 child(shared, module("Weapons", "shared/Weapons"))
-child(shared, module("Ballistics", nil, { spread = function(d) return d end }))
+-- The real shot rules (ignoredCharacters), minus the random spread: tests aim exactly where they say.
+require_(child(shared, module("Ballistics", "shared/Ballistics"))).spread = function(d) return d end
 local server = new("Folder", "Server")
 child(server, module("WeaponServer", "server/WeaponServer"))
 child(server, module("PlayerData", "server/PlayerData"))
 child(server, module("RateLimit", "server/RateLimit"))
+child(server, module("Remotes", "server/Remotes"))
 child(server, module("Suspicion", "server/Suspicion"))
 child(server, module("AimStats", "server/AimStats"))
 child(server, module("Movement", "server/Movement"))

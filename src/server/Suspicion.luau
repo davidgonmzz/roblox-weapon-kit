@@ -22,20 +22,15 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Remotes = require(script.Parent.Remotes)
 
 local Suspicion = {}
 
 local WARN_AT = 25 -- flags from one player before the one-time warn in the log
 
--- Same folder WeaponServer puts its remotes in (whoever loads first creates it).
 local rejectedRemote
 if Config.DEMO_CHEAT_PANEL then
-	local remotes = ReplicatedStorage:FindFirstChild("Remotes") or Instance.new("Folder")
-	remotes.Name = "Remotes"
-	remotes.Parent = ReplicatedStorage
-	rejectedRemote = remotes:FindFirstChild("Rejected") or Instance.new("RemoteEvent")
-	rejectedRemote.Name = "Rejected"
-	rejectedRemote.Parent = remotes
+	rejectedRemote = Remotes.event("Rejected")
 end
 
 -- [Player] = { total = flags so far, reasons = { [reason] = count } }. Never saved.

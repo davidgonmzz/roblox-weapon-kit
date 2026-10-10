@@ -2,7 +2,9 @@
 
 **A server-validated gun system for Roblox: three weapons, saved ammo, a shooting range, server-side movement checks and an exploit lab that shows the server saying no to speed hacks, fly, noclip, aimbots and more. Every part, map and target is built from code - no meshes, no Toolbox models, no asset IDs.**
 
-[Watch the demo](<video link>) | [Play it](<playable place link>) | [Hire me](#hire-me)
+[![CI](https://github.com/davidgonmzz/roblox-weapon-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/davidgonmzz/roblox-weapon-kit/actions/workflows/ci.yml)
+
+Demo video and playable place: coming soon | [Hire me](#hire-me)
 
 ## What you get
 
@@ -48,7 +50,8 @@ src/
     Config.luau                 switches: PVP, FRIENDLY_FIRE, DEMO_CHEAT_PANEL, DATASTORE_NAME, dummy settings,
                                 ANTI_CHEAT (every movement / aim threshold and exemption, one comment each)
     Weapons.luau                weapon data (add a weapon here)
-    Ballistics.luau             spread maths shared by server (real) and client (visual)
+    Ballistics.luau             spread maths + which characters a shot passes through, shared by server
+                                (real) and client (visual)
   server/                       ServerScriptService.Server
     Main.server.luau            start-up order
     WeaponServer.luau           the authority: validation, ammo, pellets, damage, remotes, onDamage / onKill hooks
@@ -59,6 +62,7 @@ src/
     LabQuery.luau               demo only: read-only "what does the server see for me"
     PlayerData.luau             ProfileStore wrapper: template, sanitise, migrate
     RateLimit.luau              token-bucket limiter + number / Vector3 validators
+    Remotes.luau                finds or creates every remote in ReplicatedStorage.Remotes
     Tools.luau                  builds the three Tools from Parts, gives them every spawn
     Range.luau                  map, lighting, spawn, ammo crate, the lab corner (demo only)
     Dummies.luau                R6 target dummies, health bars, respawn, strafer
@@ -310,9 +314,9 @@ What the mock cannot prove is how Roblox itself behaves, so those parts were mea
 
 I build server-validated gun systems and fix Roblox scripts. This kit is a sample of how I work: clean modules, comments that explain why, and no trust in the client.
 
-- Demo video: <video link>
-- Try it in Roblox: <playable place link>
-- Contact: <Discord>
+- Demo video: coming soon
+- Try it in Roblox: coming soon
+- Contact: Discord `imbetter0597`
 
 **Prices (USD)**
 

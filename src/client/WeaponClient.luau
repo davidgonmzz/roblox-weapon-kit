@@ -71,15 +71,9 @@ local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 rayParams.IgnoreWater = true
 
--- Characters the aim ray must not hit: our own, and (PVP off) everybody's, like the server.
+-- Characters the aim ray must not hit: the server's own rule (shared/Ballistics).
 local function ignoreList()
-	local list = {}
-	for _, p in Players:GetPlayers() do
-		if p.Character and (not Config.PVP or p == player) then
-			table.insert(list, p.Character)
-		end
-	end
-	return list
+	return Ballistics.ignoredCharacters(Players:GetPlayers(), player, Config.PVP)
 end
 
 -- True if `inst` is part of something with a Humanoid (a dummy or a player): the impact spark
