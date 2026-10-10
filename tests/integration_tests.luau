@@ -593,6 +593,41 @@ do
 		ray = rayCalls[#rayCalls]
 		check(ray.origin.X == 0 and ray.origin.Z == 0, "...and the shot starts at the head too")
 
+		-- The muzzle is used up to ORIGIN_SLACK (8) from the head; a moving shooter's muzzle may also run
+		-- ahead along its velocity (the server's view of the head lags). Further out the shot starts at
+		-- the head, and only past ORIGIN_FLAG_DISTANCE (16) is it flagged.
+		rayMisses() -- (no wall between head and muzzle)
+		dataA.mags.Pistol = 15 -- (13 shots below)
+		local function originShot(hint, velocity)
+			ca.HumanoidRootPart.AssemblyLinearVelocity = velocity or vec(0, 0, 0)
+			local before = Suspicion.total(a)
+			rayCalls = {}
+			shoot(a, hint)
+			local o = rayCalls[#rayCalls].origin
+			return Suspicion.total(a) - before, if o.X == 0 and o.Y == 5 and o.Z == 0 then "head" else "muzzle"
+		end
+		local function expect(hint, velocity, flags, from, label)
+			local n, at = originShot(hint, velocity)
+			eq(n .. " " .. at, flags .. " " .. from, label)
+		end
+		local run, back, fast = vec(0, 0, -16), vec(0, 0, 16), vec(0, 0, -1000)
+		expect(vec(0, 5, -7.5), nil, 0, "muzzle", "standing: a muzzle 7.5 studs from the head is used (long gun, tall avatar)")
+		expect(vec(0, 5, -8.5), nil, 0, "head", "standing: 8.5 studs starts at the head, no flag (could be lag)")
+		expect(vec(0, 5, -15.5), nil, 0, "head", "standing: 15.5 studs, still no flag")
+		expect(vec(0, 5, -16.5), nil, 1, "head", "standing: 16.5 studs IS flagged")
+		expect(vec(0, 5, -15), run, 0, "muzzle", "running 16 studs/s: 15 studs ahead along the run is used (8 + 0.5 s lead)")
+		expect(vec(0, 5, 9), run, 0, "head", "...9 studs BEHIND the run starts at the head")
+		expect(vec(0, 5, 17), run, 1, "head", "...17 behind is flagged")
+		expect(vec(17, 5, 0), run, 1, "head", "...17 to the side is flagged")
+		expect(vec(0, 5, -9), back, 0, "head", "running the other way: 9 studs ahead of the HEAD is behind the run")
+		expect(vec(0, 5, -33), fast, 0, "muzzle", "a huge velocity leads at most 50 studs/s x 0.5 s: 33 ahead is used")
+		expect(vec(0, 5, -42), fast, 1, "head", "...42 ahead is flagged (25 + 16)")
+		expect(vec(0, 5, -7), vec(0 / 0, 0, 0), 0, "muzzle", "a NaN velocity gives no lead and no error: 7 studs is used")
+		expect(vec(0, 5, -17), vec(0 / 0, 0, 0), 1, "head", "...17 studs is flagged")
+		ca.HumanoidRootPart.AssemblyLinearVelocity = vec(0, 0, 0)
+		rayHits(torso)
+		dataA.mags.Pistol = 15
+
 		-- a head position that is not a number: no shot at all (fail closed)
 		local mag, health, flags = dataA.mags.Pistol, hum.Health, Suspicion.total(a)
 		local realHead = ca.Head.Position
@@ -1610,6 +1645,27 @@ do
 		eq(configWith("CfgB", false), "log", "DEMO_CHEAT_PANEL off, default action: log (a live game reads the counts first)")
 		eq(configWith("CfgC", false, "snap"), "snap", "an explicit \"snap\" wins even with the demo panel off")
 		eq(configWith("CfgD", true, "log"), "log", "an explicit \"log\" wins even with the demo panel on")
+
+		-- The demo switch: only the Workspace attribute WeaponKitDemo = true (set in the demo place)
+		-- turns the range, the lab and the snap default on. A game the kit is dropped into has none.
+		local function demoConfig(name, value)
+			local saved = Workspace.attrs.WeaponKitDemo
+			Workspace.attrs.WeaponKitDemo = value
+			local mod = child(shared, module(name, "shared/Config"))
+			local cfg = require_(mod)
+			mod.Parent = nil
+			Workspace.attrs.WeaponKitDemo = saved
+			return cfg
+		end
+		local plain = demoConfig("CfgNoAttr", nil)
+		eq(plain.DEMO_RANGE, false, "demo switch: no WeaponKitDemo attribute -> no range (the dev's map is left alone)")
+		eq(plain.DEMO_CHEAT_PANEL, false, "demo switch: no WeaponKitDemo attribute -> no exploit lab")
+		eq(plain.ANTI_CHEAT.MOVEMENT_ACTION, "log", "demo switch: no WeaponKitDemo attribute -> movement checks only log")
+		local text = demoConfig("CfgTextAttr", "true")
+		eq(text.DEMO_RANGE, false, "demo switch: a string \"true\" is not the switch (only a ticked boolean)")
+		local demo = demoConfig("CfgDemoAttr", true)
+		eq(demo.DEMO_RANGE and demo.DEMO_CHEAT_PANEL, true, "demo switch: WeaponKitDemo = true -> range + lab on")
+		eq(demo.ANTI_CHEAT.MOVEMENT_ACTION, "snap", "demo switch: WeaponKitDemo = true -> snap")
 
 		-- Movement.init says so once, in log mode only. Loaded against its own Players / RunService so it
 		-- cannot disturb the instance the other tests drive.

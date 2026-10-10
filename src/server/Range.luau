@@ -19,7 +19,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
-local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Config = require(ReplicatedStorage:WaitForChild("WeaponKitShared"):WaitForChild("Config"))
 local Suspicion = require(script.Parent.Suspicion)
 local WeaponServer = require(script.Parent.WeaponServer)
 

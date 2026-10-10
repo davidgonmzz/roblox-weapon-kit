@@ -7,13 +7,17 @@
 -- pellet direction or a target: the weapon comes from the Tool the character is holding and
 -- everything else is rolled here.
 --
+-- Moving targets: the shooter saw every target a little in the past, so a ray that misses all
+-- targets where they stand now is also tried against where they stood during the last
+-- Config.ANTI_CHEAT.REWIND_TIME seconds (server/LagComp.luau), stopped by the same walls.
+--
 -- Suspicious requests are dropped silently and counted per player in Suspicion.luau (one warn
 -- at a threshold; no kicks or bans: a game plugs in its own policy with Suspicion.onFlag).
 -- Benign mismatches (empty, reloading, dead, data still loading) are just ignored, they are not
 -- counted. Aim flags ("aim", "snap", see AimStats.luau) are counted too, but they never block or
 -- change a shot: a skilled player can look like a script, so they are for review only.
 --
--- Remotes (ReplicatedStorage.Remotes):
+-- Remotes (ReplicatedStorage.WeaponKitRemotes):
 --   Fire       client -> server: (originHint: Vector3, direction: Vector3, shotId: number)
 --                shotId must go up on every shot; the newest one seen is echoed in AmmoSync
 --   Reload     client -> server: ()
@@ -45,13 +49,15 @@
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
-local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Shared = ReplicatedStorage:WaitForChild("WeaponKitShared")
 local Ballistics = require(Shared:WaitForChild("Ballistics"))
 local Config = require(Shared:WaitForChild("Config"))
 local Weapons = require(Shared:WaitForChild("Weapons"))
 local AimStats = require(script.Parent.AimStats)
+local LagComp = require(script.Parent.LagComp)
 local PlayerData = require(script.Parent.PlayerData)
 local RateLimit = require(script.Parent.RateLimit)
 local Remotes = require(script.Parent.Remotes)
@@ -60,7 +66,15 @@ local Suspicion = require(script.Parent.Suspicion)
 local WeaponServer = {}
 
 local FIRE_TOLERANCE = 0.2 -- a shot may come 20% of the interval early (or FIRE_JITTER, whichever is longer)
-local ORIGIN_SLACK = 6 -- studs the client's muzzle may be from the real head (lag, arm reach)
+local ORIGIN_SLACK = 8 -- studs the client's muzzle may be from the real head (arm reach, a long gun, a tall avatar)
+-- A moving shooter sees its own character ahead of where the server last saw it (replication
+-- delay), so the muzzle is measured from the stretch the head covers in this many seconds along
+-- its velocity. Studio: a rifle fired while running at 16 studs/s was 6-7 studs from the server's head.
+local ORIGIN_LEAD = 0.5
+local ORIGIN_LEAD_SPEED = 50 -- studs/s: the most velocity the lead allows for (Movement judges speed)
+-- Further than ORIGIN_SLACK the shot starts at the head; only further than this is it also flagged.
+-- Studio, lag 0.1: a rifle fired as the player starts running was ~1 stud past the slack.
+local ORIGIN_FLAG_DISTANCE = 16
 local FX_RANGE = 450 -- other players farther than this don't get the tracer
 local MAX_COORD = 1e5 -- no real position is farther from the origin than this
 local MAX_DIRECTION = 1e4 -- the client sends a unit vector; anything longer than this is nonsense
@@ -84,6 +98,9 @@ rayParams.FilterType = Enum.RaycastFilterType.Exclude
 rayParams.IgnoreWater = true
 local overlapParams = OverlapParams.new()
 overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+
+-- Where every target stood lately (filled every Heartbeat once init has run; see LagComp.luau).
+local history = LagComp.new()
 
 -- [Player] = per-player state, never saved (the ammo itself is in PlayerData):
 --   reloading    name of the weapon being reloaded, or nil
@@ -194,6 +211,36 @@ local function canDamage(shooter: Player, model: Model, humanoid: Humanoid): boo
 	return CollectionService:HasTag(model, Config.TARGET_TAG)
 end
 
+-- Everything a bullet may hurt that the history follows: player characters and tagged targets.
+local function trackedModels(): { Model }
+	local list = {}
+	for _, player in Players:GetPlayers() do
+		if player.Character then
+			table.insert(list, player.Character)
+		end
+	end
+	for _, inst in CollectionService:GetTagged(Config.TARGET_TAG) do
+		if inst:IsA("Model") then
+			table.insert(list, inst)
+		end
+	end
+	return list
+end
+
+-- The followed models this shooter may damage now: the only ones a past hit can land on.
+local function pastTargets(shooter: Player): { Model }
+	local list = {}
+	if Config.ANTI_CHEAT.REWIND_TIME > 0 then
+		for _, model in trackedModels() do
+			local humanoid = model:FindFirstChildOfClass("Humanoid")
+			if humanoid and canDamage(shooter, model, humanoid) then
+				table.insert(list, model)
+			end
+		end
+	end
+	return list
+end
+
 -- True if `point` is inside `part` or within POINT_BLANK of its surface.
 local function nearPart(part: BasePart, point: Vector3): boolean
 	if part:IsA("Part") and part.Shape == Enum.PartType.Ball then
@@ -223,9 +270,18 @@ end
 --   ends     Vector3 per pellet: where it stopped
 --   hits     boolean per pellet: it landed on something that takes damage
 --   victims  { [Humanoid] = { damage = total over all pellets, head = any headshot, model } }
+-- Distance from `point` to the segment a-b (a NaN anywhere gives NaN).
+local function distanceToSegment(point: Vector3, a: Vector3, b: Vector3): number
+	local ab = b - a
+	local lengthSq = ab:Dot(ab)
+	local t = if lengthSq > 0 then math.clamp((point - a):Dot(ab) / lengthSq, 0, 1) else 0
+	return (point - (a + ab * t)).Magnitude
+end
+
 local function castPellets(shooter: Player, weapon, origin: Vector3, aim: Vector3)
 	local ends, hits, victims = {}, {}, {}
 	local pressedInto = pointBlankPart(shooter, origin) -- muzzle jammed into a hitbox: every pellet hits it
+	local past = if pressedInto then {} else pastTargets(shooter)
 	for i = 1, weapon.pellets do
 		local direction = Ballistics.spread(aim, weapon.spread, rng)
 		local part, endPoint
@@ -235,6 +291,15 @@ local function castPellets(shooter: Player, weapon, origin: Vector3, aim: Vector
 			local result = Workspace:Raycast(origin, direction * weapon.range, rayParams)
 			endPoint = if result then result.Position else origin + direction * weapon.range
 			part = if result then result.Instance else nil
+			-- Missed every target where it stands now: try where they stood a moment ago (what the
+			-- shooter saw), never further along the ray than whatever stopped it.
+			local nowModel, nowHumanoid = humanoidModel(part)
+			if #past > 0 and not (nowHumanoid and canDamage(shooter, nowModel, nowHumanoid)) then
+				local pastPart, pastPoint = history:castPast(origin, direction, (endPoint - origin).Magnitude, past)
+				if pastPart then
+					part, endPoint = pastPart, pastPoint
+				end
+			end
 		end
 
 		local landed = false
@@ -388,11 +453,19 @@ local function onFire(player: Player, originHint, direction, shotId)
 	overlapParams.FilterDescendantsInstances = rayParams.FilterDescendantsInstances
 	local origin = originHint
 	local offset = originHint - headPos
-	if not (offset.Magnitude <= ORIGIN_SLACK) then -- (written so that a NaN goes to the fallback too)
-		-- A seated shooter (a vehicle) has a muzzle that runs ahead of the head at vehicle speed: the
-		-- shot still starts at the head, but that is not worth a flag.
+	local root = character:FindFirstChild("HumanoidRootPart")
+	local velocity = if root then root.AssemblyLinearVelocity else nil
+	local lead = Vector3.zero
+	if RateLimit.isVector3(velocity, MAX_COORD) and velocity.Magnitude > 0 then
+		lead = velocity.Unit * math.min(velocity.Magnitude, ORIGIN_LEAD_SPEED) * ORIGIN_LEAD
+	end
+	local distance = distanceToSegment(originHint, headPos, headPos + lead)
+	if not (distance <= ORIGIN_SLACK) then -- (written so that a NaN goes to the fallback too)
+		-- The shot starts at the head. It is reported only when the muzzle is further out than lag can
+		-- explain (a player who just started running is seen late, before any velocity arrives), and
+		-- never for a seated shooter: a vehicle's muzzle runs ahead of the head at vehicle speed.
 		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		if not (humanoid and humanoid.SeatPart ~= nil) then
+		if not (distance <= ORIGIN_FLAG_DISTANCE) and not (humanoid and humanoid.SeatPart ~= nil) then
 			Suspicion.report(player, "origin")
 		end
 		origin = headPos
@@ -561,6 +634,12 @@ end
 function WeaponServer.init()
 	fireRemote.OnServerEvent:Connect(onFire)
 	reloadRemote.OnServerEvent:Connect(onReload)
+	RunService.Heartbeat:Connect(function()
+		local window = Config.ANTI_CHEAT.REWIND_TIME
+		if window > 0 then
+			history:record(trackedModels(), os.clock(), window)
+		end
+	end)
 
 	local function onPlayer(player: Player)
 		player.CharacterAdded:Connect(function(character)

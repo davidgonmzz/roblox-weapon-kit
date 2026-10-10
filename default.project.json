@@ -1,23 +1,35 @@
 {
   "name": "weapon-kit",
-  "globIgnorePaths": ["**/*.tmp", "**/*.tmp.*", "**/sed*", "**/*~", "**/.#*"],
+  "globIgnorePaths": [
+    "**/*.tmp",
+    "**/*.tmp.*",
+    "**/sed*",
+    "**/*~",
+    "**/.#*"
+  ],
   "tree": {
     "$className": "DataModel",
     "ReplicatedStorage": {
-      "Shared": {
+      "WeaponKitShared": {
         "$path": "src/shared"
       }
     },
     "ServerScriptService": {
-      "Server": {
+      "WeaponKitServer": {
         "$path": "src/server"
       }
     },
     "StarterPlayer": {
       "StarterPlayerScripts": {
-        "Client": {
+        "WeaponKitClient": {
           "$path": "src/client"
         }
+      }
+    },
+    "Workspace": {
+      "$className": "Workspace",
+      "$attributes": {
+        "WeaponKitDemo": true
       }
     }
   }

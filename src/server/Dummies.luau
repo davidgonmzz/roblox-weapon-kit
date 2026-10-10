@@ -17,7 +17,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
-local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Config = require(ReplicatedStorage:WaitForChild("WeaponKitShared"):WaitForChild("Config"))
 
 local Dummies = {}
 

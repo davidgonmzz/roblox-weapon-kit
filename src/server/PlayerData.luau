@@ -17,7 +17,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Shared = ReplicatedStorage:WaitForChild("WeaponKitShared")
 local Config = require(Shared:WaitForChild("Config"))
 local Weapons = require(Shared:WaitForChild("Weapons"))
 local ProfileStore = require(script.Parent.Vendor.ProfileStore)

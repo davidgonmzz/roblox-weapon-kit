@@ -248,7 +248,7 @@ do
 	frames(1)
 	rx.Parent = nil
 	local pb, cb, hb, rb = spawn("W9b", 1090)
-	rb.Size = nil -- a part with missing properties: the wrapper must contain the error, not stop the loop
+	rb.AssemblyLinearVelocity = nil -- a part with missing properties: the wrapper must contain the error, not stop the loop
 	frames(3)
 	check(#warns > 0 and warns[#warns]:find("Movement"), "W9: an error in one sample is warned once, not thrown")
 	Players.PlayerRemoving:fire(pb)

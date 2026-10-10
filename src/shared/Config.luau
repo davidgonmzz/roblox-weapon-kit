@@ -2,6 +2,13 @@
 -- Switches and tuning numbers shared by the server and the client. Nothing in here is a secret:
 -- every value is either harmless to show a player or re-checked by the server anyway.
 
+-- The demo place (and only the demo place) sets the Workspace attribute "WeaponKitDemo" to true.
+-- Your game doesn't have it, so dropping the kit into a game never builds the range, never touches
+-- your map and never shows the exploit lab. Workspace attributes replicate, so the client reads the
+-- same value. To get the range in a fresh test place: Workspace > Properties > Attributes > add a
+-- boolean "WeaponKitDemo", ticked.
+local DEMO = game:GetService("Workspace"):GetAttribute("WeaponKitDemo") == true
+
 local Config = {
 	-- false: bullets pass through other players and only dummies take damage.
 	-- true:  players can shoot each other (the shooter's own character is always ignored).
@@ -12,10 +19,21 @@ local Config = {
 	-- true: team mates hurt each other.
 	FRIENDLY_FIRE = false,
 
-	-- Demo only. Shows the exploit simulator (client/CheatPanel.luau, F2) and makes the server
-	-- tell the shooter WHY it refused a request. Set to false (or delete CheatPanel.luau) for
-	-- production: a real game should never explain its anti-cheat to the player.
-	DEMO_CHEAT_PANEL = true,
+	-- Demo only (follows WeaponKitDemo). Builds the shooting range at server start: it REPLACES
+	-- Studio's Baseplate and SpawnLocation, adds the dummies and the ammo crate. Without it the kit
+	-- adds no parts at all: tag your own targets with TARGET_TAG and refill ammo from your own
+	-- server code with WeaponServer.restock(player).
+	DEMO_RANGE = DEMO,
+
+	-- Demo only (follows WeaponKitDemo). Shows the exploit simulator (client/CheatPanel.luau, F2)
+	-- and makes the server tell the shooter WHY it refused a request. A real game should never
+	-- explain its anti-cheat to the player.
+	DEMO_CHEAT_PANEL = DEMO,
+
+	-- false: the kit draws no HUD (crosshair, ammo panel, weapon bar, hit markers), leaves the mouse
+	-- cursor and Roblox's hotbar alone and ignores the 1-9 keys. Build your own GUI from the signals
+	-- and functions in WeaponKitShared.ClientApi (equip / reload / AmmoChanged / Hit ...).
+	HUD = true,
 
 	-- DataStore name used by ProfileStore. Bump the suffix to start everybody on fresh data.
 	DATASTORE_NAME = "WeaponKit_v1",
@@ -160,6 +178,16 @@ local Config = {
 		FIRE_JITTER = 0.1,
 		FAST_FLAG_COUNT = 3,
 		FAST_FLAG_WINDOW = 2,
+
+		-- moving targets (server/LagComp.luau): every player sees the rest of the world a little in the past
+		-- (measured in Studio at zero ping: a moving target shows 0.2-0.35 s behind the server; a real server
+		-- adds the shooter's ping on top), so a shot aimed dead at a running target reaches the server after
+		-- the target has moved on. When the server's ray misses every target where it stands NOW, the same ray
+		-- (same spread, stopped by the same walls) is tested against where each target stood during the last
+		-- REWIND_TIME seconds. Larger keeps hits registering at a higher ping; the price is that a target can
+		-- be hit up to this long after it stepped behind cover, and a cheater can aim at that short trail too.
+		-- 0 = off (only where targets stand now counts).
+		REWIND_TIME = 0.6,
 
 		-- aim: of the last AIM_WINDOW hits, more than AIM_HEADSHOT_RATIO headshots, judged once
 		-- AIM_MIN_HITS hits exist. Single-pellet weapons only. Flag only, a shot is never blocked.

@@ -1,9 +1,12 @@
 --!nonstrict
 -- The on-screen HUD: crosshair (follows the mouse, blooms when you shoot), hit marker and damage
 -- number, ammo panel, weapon bar (1 / 2 / 3), stats and a key hint. It only DRAWS what
--- WeaponClient tells it; it never decides anything.
+-- WeaponClient tells it; it never decides anything. Config.HUD = false hides all of it.
+-- The layout follows the device in use (UserInputService.PreferredInput): on a phone the ammo panel
+-- and weapon bar move to the top (clear of the thumbstick and jump button) and a RELOAD button
+-- appears; on a gamepad the hint shows pad buttons. Slots are buttons, so tapping one switches.
 --
---   Hud.start()
+--   Hud.start(actions)               -> actions = { toggle = fn(weaponName), reload = fn() }
 --   Hud.aimPoint()                   -> Vector2 screen position the crosshair is at
 --   Hud.setWeapon(def | nil)         -> show / hide the crosshair and ammo panel for a weapon
 --   Hud.setAmmo(mag, reserve)        -> "15 / 60" (reserve nil = not known yet)
@@ -13,6 +16,7 @@
 --   Hud.hitMarker(damage, headshot, killed)
 --   Hud.selectSlot(name | nil)       -> highlights a slot in the weapon bar
 
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -20,7 +24,7 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Shared = ReplicatedStorage:WaitForChild("WeaponKitShared")
 local Config = require(Shared:WaitForChild("Config"))
 local Weapons = require(Shared:WaitForChild("Weapons"))
 
@@ -36,12 +40,25 @@ local FONT_LIGHT = Enum.Font.GothamMedium
 
 local CROSS_GAP = 7 -- pixels between the centre and the crosshair lines
 local BLOOM_DECAY = 60 -- pixels per second the bloom closes again
+local TOUCH_SCALE = 0.75 -- ammo panel and weapon bar size on a phone
+
+-- Per device: the key hint along the bottom and the empty-magazine prompt.
+local HINTS = {
+	keyboard = "LMB fire    R reload    1 2 3 switch",
+	gamepad = "R2 fire    X reload    L1 R1 switch",
+	touch = "", -- the buttons speak for themselves
+}
+local RELOAD_PROMPTS = { keyboard = "PRESS R", gamepad = "PRESS X", touch = "TAP RELOAD" }
 
 local gui
 local crosshair, hitFrame, hitTicks
 local ammoPanel, nameLabel, ammoLabel, reloadBar, reloadFill, accent
 local slots = {} -- [weaponName] = { frame, stroke }
+local slotBar, hintLabel, reloadButton
+local panelScale, barScale -- UIScales of the ammo panel and the weapon bar
 local statsLabel
+local actions = {} -- { toggle = fn(name), reload = fn() } from WeaponClient
+local inputKind = "keyboard" -- "keyboard", "gamepad" or "touch": the device the player is using
 local weapon -- the Weapon def currently shown, or nil
 local bloom = 0
 local reloadStart -- os.clock() when the current reload began, or nil
@@ -140,6 +157,8 @@ local function buildAmmoPanel()
 		Visible = false,
 	})
 	corner(ammoPanel, 8)
+	panelScale = Instance.new("UIScale")
+	panelScale.Parent = ammoPanel
 	ammoPanel.Parent = gui
 
 	accent = box({ Size = UDim2.new(0, 4, 1, -16), Position = UDim2.fromOffset(8, 8), BackgroundColor3 = INK })
@@ -183,12 +202,11 @@ local function buildAmmoPanel()
 	end)
 end
 
--- The bar of weapons along the bottom, built from Weapons.Order (so a new weapon appears by itself).
+-- The bar of weapons, built from Weapons.Order (so a new weapon appears by itself). Each slot is a
+-- button: click or tap it to take that weapon out or put it away.
 local function buildSlots()
-	local bar = box({
+	slotBar = box({
 		Name = "Slots",
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -24),
 		Size = UDim2.fromOffset(#Weapons.Order * 134, 50),
 		BackgroundTransparency = 1,
 	})
@@ -196,18 +214,27 @@ local function buildSlots()
 	layout.FillDirection = Enum.FillDirection.Horizontal
 	layout.Padding = UDim.new(0, 6)
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	layout.Parent = bar
-	bar.Parent = gui
+	layout.Parent = slotBar
+	barScale = Instance.new("UIScale")
+	barScale.Parent = slotBar
+	slotBar.Parent = gui
 
 	for index, name in Weapons.Order do
 		local def = Weapons.Defs[name]
-		local frame = box({
-			Name = name,
-			Size = UDim2.fromOffset(128, 50),
-			BackgroundColor3 = PANEL,
-			BackgroundTransparency = 0.35,
-			LayoutOrder = index,
-		})
+		local frame = Instance.new("TextButton")
+		frame.Name = name
+		frame.Text = ""
+		frame.AutoButtonColor = false
+		frame.BorderSizePixel = 0
+		frame.Size = UDim2.fromOffset(128, 50)
+		frame.BackgroundColor3 = PANEL
+		frame.BackgroundTransparency = 0.35
+		frame.LayoutOrder = index
+		frame.Activated:Connect(function()
+			if actions.toggle then
+				actions.toggle(name)
+			end
+		end)
 		corner(frame, 8)
 		local stroke = Instance.new("UIStroke")
 		stroke.Color = def.color
@@ -234,7 +261,7 @@ local function buildSlots()
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}).Parent =
 			frame
-		frame.Parent = bar
+		frame.Parent = slotBar
 		slots[name] = { frame = frame, stroke = stroke }
 	end
 end
@@ -253,11 +280,7 @@ local function buildCorners()
 	})
 	statsLabel.Parent = gui
 
-	local hint = "LMB fire    R reload    1 2 3 switch"
-	if Config.DEMO_CHEAT_PANEL then
-		hint ..= "    F2 exploit simulator"
-	end
-	label({
+	hintLabel = label({
 		Name = "Hint",
 		AnchorPoint = Vector2.new(0, 1),
 		Position = UDim2.new(0, 16, 1, -16),
@@ -267,9 +290,30 @@ local function buildCorners()
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextColor3 = DIM,
 		TextStrokeTransparency = 0.7,
-		Text = hint,
-	}).Parent =
-		gui
+	})
+	hintLabel.Parent = gui
+
+	-- Phones only (keyboards have R, pads have X): right edge, above Roblox's jump button.
+	reloadButton = Instance.new("TextButton")
+	reloadButton.Name = "Reload"
+	reloadButton.AnchorPoint = Vector2.new(1, 0.5)
+	reloadButton.Position = UDim2.new(1, -24, 0.5, 0)
+	reloadButton.Size = UDim2.fromOffset(72, 72)
+	reloadButton.BackgroundColor3 = PANEL
+	reloadButton.BackgroundTransparency = 0.25
+	reloadButton.BorderSizePixel = 0
+	reloadButton.Font = FONT
+	reloadButton.TextSize = 14
+	reloadButton.TextColor3 = INK
+	reloadButton.Text = "RELOAD"
+	reloadButton.Visible = false
+	corner(reloadButton, 36)
+	reloadButton.Activated:Connect(function()
+		if actions.reload then
+			actions.reload()
+		end
+	end)
+	reloadButton.Parent = gui
 end
 
 -- Kills and accuracy of the local player (the server keeps them as Player attributes).
@@ -288,11 +332,36 @@ local function watchStats()
 	refresh()
 end
 
+-- The device the player is using, from Roblox's own pick (PreferredInput); clients without that
+-- property fall back to what the device has.
+local function readInputKind(): string
+	local ok, preferred = pcall(function()
+		return (UserInputService :: any).PreferredInput
+	end)
+	if ok and typeof(preferred) == "EnumItem" then
+		if preferred.Name == "Touch" then
+			return "touch"
+		elseif preferred.Name == "Gamepad" or preferred.Name == "MicroGamepad" then
+			return "gamepad"
+		end
+		return "keyboard"
+	end
+	if not UserInputService.MouseEnabled then
+		if UserInputService.TouchEnabled then
+			return "touch"
+		elseif UserInputService.GamepadEnabled then
+			return "gamepad"
+		end
+	end
+	return "keyboard"
+end
+
+-- Mouse: where the mouse is. Phone and gamepad: the screen centre (there is no pointer to follow).
 function Hud.aimPoint(): Vector2
-	local camera = Workspace.CurrentCamera
-	if UserInputService.MouseEnabled then
+	if inputKind == "keyboard" and UserInputService.MouseEnabled then
 		return UserInputService:GetMouseLocation() -- (equals the screen centre when the mouse is locked)
 	end
+	local camera = Workspace.CurrentCamera
 	return if camera then camera.ViewportSize / 2 else Vector2.zero
 end
 
@@ -306,7 +375,7 @@ local function renderName()
 		nameLabel.Text = name .. "   -   OUT OF AMMO"
 		nameLabel.TextColor3 = DANGER
 	elseif magEmpty then
-		nameLabel.Text = name .. "   -   PRESS R"
+		nameLabel.Text = name .. "   -   " .. RELOAD_PROMPTS[inputKind]
 		nameLabel.TextColor3 = DANGER
 	else
 		nameLabel.Text = name
@@ -316,7 +385,43 @@ end
 
 local function updateCursor()
 	crosshair.Visible = weapon ~= nil and not cursorForced
-	UserInputService.MouseIconEnabled = weapon == nil or cursorForced -- our crosshair replaces the cursor
+	reloadButton.Visible = weapon ~= nil and inputKind == "touch"
+	if Config.HUD then
+		UserInputService.MouseIconEnabled = weapon == nil or cursorForced -- our crosshair replaces the cursor
+	end
+end
+
+-- Moves things for the device in use. Phone: ammo panel top right and weapon bar top left, both
+-- smaller, so the thumbstick (bottom left) and jump button (bottom right) stay free.
+local function applyLayout()
+	local touch = inputKind == "touch"
+	-- Below Roblox's top bar. Its height is still 0 while the HUD is built (Studio, iPhone sim):
+	-- assume today's 58 until the real value arrives (TopbarInset re-runs this).
+	local inset = GuiService:GetGuiInset().Y
+	local top = (if inset > 0 then inset else 58) + 8
+	if touch then
+		-- Same row, opposite corners: on a 667-wide phone a centred bar would touch the panel.
+		ammoPanel.AnchorPoint = Vector2.new(1, 0)
+		ammoPanel.Position = UDim2.new(1, -16, 0, top)
+		slotBar.AnchorPoint = Vector2.new(0, 0)
+		slotBar.Position = UDim2.fromOffset(16, top)
+	else
+		ammoPanel.AnchorPoint = Vector2.new(1, 1)
+		ammoPanel.Position = UDim2.new(1, -24, 1, -24)
+		slotBar.AnchorPoint = Vector2.new(0.5, 1)
+		slotBar.Position = UDim2.new(0.5, 0, 1, -24)
+	end
+	panelScale.Scale = if touch then TOUCH_SCALE else 1
+	barScale.Scale = if touch then TOUCH_SCALE else 1
+
+	local hint = HINTS[inputKind]
+	if Config.DEMO_CHEAT_PANEL and inputKind == "keyboard" then
+		hint ..= "    F2 exploit simulator"
+	end
+	hintLabel.Text = hint
+	hintLabel.Visible = hint ~= ""
+	updateCursor()
+	renderName()
 end
 
 function Hud.setWeapon(def)
@@ -400,12 +505,14 @@ function Hud.selectSlot(name: string?)
 	end
 end
 
-function Hud.start()
+function Hud.start(newActions)
+	actions = newActions or {}
 	gui = Instance.new("ScreenGui")
 	gui.Name = "WeaponKitHud"
 	gui.ResetOnSpawn = false
 	gui.IgnoreGuiInset = true -- so GetMouseLocation() and GUI coordinates are the same space
 	gui.DisplayOrder = 5
+	gui.Enabled = Config.HUD -- off: built anyway (aimPoint and the calls still work), never shown
 	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
 
 	buildCrosshair()
@@ -414,6 +521,21 @@ function Hud.start()
 	buildCorners()
 	watchStats()
 	Hud.selectSlot(nil)
+
+	inputKind = readInputKind()
+	applyLayout()
+	pcall(function() -- Roblox's top bar height arrives after the HUD is built
+		GuiService:GetPropertyChangedSignal("TopbarInset"):Connect(applyLayout)
+	end)
+	pcall(function() -- a pad plugged in, or a touch screen laptop switching: re-lay out
+		UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(function()
+			local kind = readInputKind()
+			if kind ~= inputKind then
+				inputKind = kind
+				applyLayout()
+			end
+		end)
+	end)
 end
 
 return Hud

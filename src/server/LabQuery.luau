@@ -12,7 +12,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Shared = ReplicatedStorage:WaitForChild("WeaponKitShared")
 local Config = require(Shared:WaitForChild("Config"))
 local RateLimit = require(script.Parent.RateLimit)
 local Remotes = require(script.Parent.Remotes)

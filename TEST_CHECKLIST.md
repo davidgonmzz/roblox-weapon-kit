@@ -6,7 +6,7 @@ Tick each line as you go. "Expect" says what should happen. Anything that doesn'
 
 1. Run `rojo serve` in `weapon_kit`, open an empty (or Baseplate) place in Studio, Plugins > Rojo > Connect. Or build with `rojo build default.project.json -o WeaponKit.rbxl` and open that.
 2. Press Play (F5).
-   - Expect in Output, in order: `[WeaponKit] server started`, the PlayerData mock-store line (unpublished place only), `Range ready`, `WeaponServer ready`, `Tools ready (3 weapons)`, `Dummies ready (5)`, `Dummies ready (1)` (the lab's wallbang dummy), `Movement ready (snap)`, `LabQuery ready (demo)`, `[WeaponKit] ready`, `[WeaponKit] client started`. No red errors.
+   - Expect in Output, in order: `[WeaponKit] server started`, the PlayerData mock-store line (unpublished place only), `Range ready`, `WeaponServer ready`, `Tools ready (3 weapons, 0 own models)`, `Dummies ready (5)`, `Dummies ready (1)` (the lab's wallbang dummy), `Movement ready (snap)`, `LabQuery ready (demo)`, `[WeaponKit] ready`, `[WeaponKit] client started`. No red errors.
 3. Look around.
    - Expect: you spawn on a teal pad behind the firing line, a banner "WEAPON KIT" above, five lanes ahead, an olive ammo crate with a yellow "AMMO" label to your right, five orange dummies with bullseyes and health bars.
    - Expect: the Pistol is already in your hand, the bottom bar shows `1 PISTOL  2 RIFLE  3 SHOTGUN` with the Pistol highlighted, the ammo panel reads `15 / 60`.
@@ -93,7 +93,7 @@ The mock store keeps nothing: in an unpublished place, step 31 onwards will show
 
 ## 9. Production switch
 
-36. Set `DEMO_CHEAT_PANEL = false` in Config, play. Expect: no `F2 exploit simulator` in the bottom-left hint, F2 does nothing, and the Output never shows `Rejected` activity. In the Explorer, ReplicatedStorage > Remotes has no `Rejected` and no `LabQuery`; the range has no lab corner (no `Range.Lab` folder, `Dummies ready (5)` only). The movement checks still run (`Movement ready (snap)`).
+36. Untick (or delete) the Workspace attribute `WeaponKitDemo`, play. Expect: no range, dummies, crate or lab corner (Studio's own Baseplate and SpawnLocation stay), no `F2 exploit simulator` hint, F2 does nothing. In the Explorer, ReplicatedStorage > WeaponKitRemotes has no `Rejected` and no `LabQuery`. The Output shows `Movement ready (log)` and ends with `[WeaponKit] ready` (no `(demo)`). Tick it again afterwards.
 
 ## 10. Exploit lab: the other COMBAT tests
 
@@ -153,7 +153,58 @@ Open the lab (F2) and note the totals in the flag list; close it, do the step, o
 
 62. **Log mode.** Set `MOVEMENT_ACTION = "log"` in `Config.ANTI_CHEAT`, play, run **Speed hack**. Expect: flags count (`speed x2` or more), you are NOT pulled back by the server (the result says `the server did NOT move you back (the lab put you back)`). Set it back to `"snap"`.
 63. **onFlag hook.** Temporarily add to `Main.server.luau`: `require(script.Parent.Suspicion).onFlag(function(p, reason, detail, n, total) print("FLAG", p.Name, reason, detail, n, total) end)`. Run **Speed hack**. Expect: one `FLAG ...` line per counted flag in the server Output, with a detail like `31.2 over the limit of 24.8`. Remove the line again.
-64. **Sanctioned teleport.** In the server command bar (Output context: Server), with one player in the game: `require(game.ServerScriptService.Server.Movement).allowTeleport(game.Players:GetPlayers()[1], CFrame.new(60, 3, 40))`. Expect: you are moved, no flag, and you can walk on from there. Then run `game.Players:GetPlayers()[1].Character:PivotTo(CFrame.new(-60, 3, 40))` (a teleport your game did NOT announce). Expect: a `teleport` flag and you are put back.
+64. **Server teleport.** In the server command bar (Output context: Server), with one player in the game: `game.Players:GetPlayers()[1].Character:PivotTo(CFrame.new(60, 3, 40))`. Expect: you are moved, no flag (a server move is recognised and trusted), and you can walk on from there. (Calling `Movement.allowTeleport` from the command bar does nothing: `require` there returns a separate copy of the module, not the game's.)
+
+## 14. Client API, phones and gamepads, own gun models
+
+Steps 65 - 68 need only a normal Play test. Steps 69 and 70 use Studio's device simulator (Test tab). When you are done, set `HUD = true` again and delete the test scripts and the `WeaponKitModels` folder.
+
+65. **API probe.** Add a LocalScript to StarterPlayerScripts. It connects before the kit's client has started, then drives the kit through the functions:
+    ```lua
+    local WeaponKit = require(game.ReplicatedStorage.WeaponKitShared.ClientApi)
+    local count = { WeaponChanged = 0, AmmoChanged = 0, Fired = 0, Hit = 0 }
+    for name in count do
+    	WeaponKit[name]:Connect(function(...)
+    		count[name] += 1
+    		print(name, ...)
+    	end)
+    end
+    task.wait(8)
+    print("ready", WeaponKit.isReady(), "held", WeaponKit.held(), "Rifle ammo", WeaponKit.ammo("Rifle"))
+    WeaponKit.equip("Rifle")
+    task.wait(1)
+    print("held", WeaponKit.held())
+    WeaponKit.toggle("Rifle") -- puts it away
+    task.wait(1)
+    print("held", WeaponKit.held())
+    WeaponKit.equip("Shotgun")
+    task.wait(1)
+    WeaponKit.unequip()
+    task.wait(1)
+    print("held", WeaponKit.held(), "counts", count.WeaponChanged, count.AmmoChanged, count.Fired, count.Hit)
+    ```
+    Press Play and do not touch anything for 12 s.
+    - Expect: a `WeaponChanged Pistol` line for the weapon you spawn with (Pistol on a fresh profile), then after 8 s `ready true held Pistol Rifle ammo 30 120 false` (the Rifle's magazine, reserve and reloading), then `held Rifle`, `held nil`, and last `held nil` with the four counts. A `WeaponChanged` line appears for every change (`nil` = put away). No red errors.
+66. **Signals in play.** Same probe, Play. Wait 12 s for the probe to finish, then press 2, shoot a dummy until you get hits, empty the magazine, wait for the reload, press 2 again.
+    - Expect: one `Fired Rifle` per shot; `AmmoChanged Rifle <mag> <reserve> false` lines with the magazine counting down; one `Hit <damage> <headshot> <killed>` per hit marker you saw (headshot `true` on a head hit, killed `true` on the killing hit); `AmmoChanged Rifle 0 <reserve> true` when the reload starts and `AmmoChanged Rifle 30 <reserve> false` when it ends; `WeaponChanged nil` when you put the Rifle away.
+67. **Server copy.** Add a Script (not a LocalScript) to ServerScriptService: `print(require(game.ReplicatedStorage.WeaponKitShared.ClientApi).isReady())`. Play.
+    - Expect: `false` in the server Output, and none of the signals ever fire there. Remove the Script.
+68. **`Config.HUD = false`.** Set `HUD = false` in `WeaponKit > WeaponKitShared > Config`. Play, keep the probe from step 65.
+    - Expect: no crosshair, ammo panel, weapon bar, stats or key hint, and no hit markers or damage numbers. The normal mouse cursor stays visible and Roblox's own hotbar shows the three tools; 1 / 2 / 3 switch through the hotbar. Left click still fires, R still reloads, and the probe prints the same lines as before. Set `HUD = true` again.
+69. **Phone layout.** Test tab > device simulator, pick an iPhone (landscape), Play.
+    - Expect: the ammo panel at the top right and the weapon bar at the top left, both just below Roblox's top bar and smaller (75%); no key hint along the bottom; a round `RELOAD` button on the right edge above the jump button once a weapon is in hand. The crosshair sits at the screen centre.
+    - Tap a slot in the weapon bar: that weapon comes out, tapping it again puts it away. Tap the screen: the weapon fires at the screen centre. Fire a few shots and tap `RELOAD`: the reload runs. An empty-magazine prompt, if it shows, reads `TAP RELOAD`.
+    - Switch the simulator back to the computer device and Play again: the key hint `LMB fire    R reload    1 2 3 switch` returns and the ammo panel and weapon bar sit at the bottom.
+70. **Gamepad buttons.** In the device simulator pick the gamepad entry (or plug in a pad), Play, and click its buttons.
+    - Expect: the key hint reads `R2 fire    X reload    L1 R1 switch`, no `RELOAD` button, crosshair at the screen centre. R2 fires (hold it for the Rifle), X reloads after a few shots, R1 takes out the next weapon (Pistol, Rifle, Shotgun, then round to the Pistol) and L1 the previous one. An empty-magazine prompt, if it shows, reads `PRESS X`.
+71. **Own models.** In the Explorer (edit mode) make `ServerStorage > Folder "WeaponKitModels"` with these four children, then press Play:
+    - `Pistol`: a Model of a few Parts that stay within 2 studs of its pivot, the barrel along the pivot's front (-Z). No Attachment, no Handle.
+    - `Rifle`: a Tool with a `Handle`, one more Part, an Attachment named `TipAttachment` at the barrel tip (within 3 studs of the Handle) and a Script inside it.
+    - `Rilfe`: any Part (a misspelled name).
+    - `Shotgun`: a Model with a Part about 12 studs long (Size Z = 12) centred on the pivot, no Attachment.
+    - Expect exactly 5 warnings in the Output, each once (no red errors): `[WeaponKit] WeaponKitModels.Rilfe matches no weapon in Weapons.luau (names: Pistol, Rifle, Shotgun), so it is not used.` before the `Tools ready (3 weapons, 3 own models)` line; and, when you spawn, `WeaponKitModels.Pistol has no Attachment named Muzzle: ...`, `WeaponKitModels.Rifle: removed 1 script(s) inside it (the kit does the shooting).`, `WeaponKitModels.Shotgun has no Attachment named Muzzle: ...` and `WeaponKitModels.Shotgun: the Muzzle is 6.0 studs from the grip. ...` (about 6 studs).
+    - Expect in game: 1 / 2 / 3 hold your Pistol, Rifle and Shotgun models, barrels pointing forward, nothing falling apart (every part is welded). Tracers start at the Rifle's `TipAttachment`, and at the front-most point of the other two models. The models never block a shot or collide (shoot a dummy at point-blank range). The Tools in the Backpack keep the weapon names (`Pistol`, `Rifle`, `Shotgun`) and the kit's weapon bar still works.
+72. Reset your character (Esc > Reset) twice. Expect: the same models again, no new warnings. Delete the `WeaponKitModels` folder and Play: the built-in boxes are back and the line reads `Tools ready (3 weapons, 0 own models)`.
 
 ---
 

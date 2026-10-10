@@ -44,10 +44,43 @@ V3.__div = function(a, b)
 	return vec(a.X / b.X, a.Y / b.Y, a.Z / b.Z)
 end
 local Vector3 = { new = vec, zero = vec(0, 0, 0), one = vec(1, 1, 1) }
--- CFrame: only a position; `cf + v` moves it (the kit shifts a remembered CFrame that way).
-local CF = {}
-CF.__add = function(cf, v) return setmetatable({ Position = cf.Position + v }, CF) end
-local CFrame = { new = function(x, y, z) return setmetatable({ Position = vec(x, y, z) }, CF) end }
+-- CFrame: a position plus a rotation matrix R (rows, identity unless built with CFrame.Angles or
+-- composed). `cf + v` moves it (the kit shifts a remembered CFrame that way), `a * b` composes and
+-- `cf * v` maps a point; PointToObjectSpace / VectorToObjectSpace / ToObjectSpace invert it (LagComp).
+local CF, CFrame = {}, nil
+do
+local IDENTITY = { 1, 0, 0, 0, 1, 0, 0, 0, 1 }
+local function cframe(pos, r) return setmetatable({ Position = pos, R = r or IDENTITY }, CF) end
+local function rotate(r, v) return vec(r[1] * v.X + r[2] * v.Y + r[3] * v.Z, r[4] * v.X + r[5] * v.Y + r[6] * v.Z, r[7] * v.X + r[8] * v.Y + r[9] * v.Z) end
+local function unrotate(r, v) return vec(r[1] * v.X + r[4] * v.Y + r[7] * v.Z, r[2] * v.X + r[5] * v.Y + r[8] * v.Z, r[3] * v.X + r[6] * v.Y + r[9] * v.Z) end
+local function matmul(a, b)
+	local m = {}
+	for i = 0, 2 do
+		for j = 1, 3 do m[i * 3 + j] = a[i * 3 + 1] * b[j] + a[i * 3 + 2] * b[3 + j] + a[i * 3 + 3] * b[6 + j] end
+	end
+	return m
+end
+local function transpose(r) return { r[1], r[4], r[7], r[2], r[5], r[8], r[3], r[6], r[9] } end
+CF.__index = {
+	PointToObjectSpace = function(self, p) return unrotate(self.R, p - self.Position) end,
+	VectorToObjectSpace = function(self, v) return unrotate(self.R, v) end,
+	ToObjectSpace = function(self, o) return cframe(unrotate(self.R, o.Position - self.Position), matmul(transpose(self.R), o.R)) end,
+}
+CF.__add = function(cf, v) return cframe(cf.Position + v, cf.R) end
+CF.__mul = function(a, b)
+	if getmetatable(b) == CF then return cframe(a.Position + rotate(a.R, b.Position), matmul(a.R, b.R)) end
+	return a.Position + rotate(a.R, b)
+end
+CFrame = {
+	new = function(x, y, z) return cframe(if type(x) == "table" then x else vec(x, y, z)) end,
+	-- Roblox order: R = Rx * Ry * Rz
+	Angles = function(rx, ry, rz)
+		local cx, sx, cy, sy, cz, sz = math.cos(rx), math.sin(rx), math.cos(ry), math.sin(ry), math.cos(rz), math.sin(rz)
+		local mx, my, mz = { 1, 0, 0, 0, cx, -sx, 0, sx, cx }, { cy, 0, sy, 0, 1, 0, -sy, 0, cy }, { cz, -sz, 0, sz, cz, 0, 0, 0, 1 }
+		return cframe(vec(0, 0, 0), matmul(matmul(mx, my), mz))
+	end,
+}
+end
 local function typeofMock(v)
 	local mt = type(v) == "table" and getmetatable(v)
 	if mt and mt.__type then return mt.__type end
@@ -134,6 +167,11 @@ Inst.__index = function(t, k)
 	if k == "Parent" then return rawget(t, "_parent") end
 	if VELOCITY_KEYS[k] then return rawget(t, VELOCITY_KEYS[k]) end
 	if Inst[k] ~= nil then return Inst[k] end
+	-- Like Roblox, every part has a CFrame and a Size: unset ones follow Position / Instance.new("Part")'s 4x1x2.
+	if (classIs[t.ClassName] or {}).BasePart then
+		if k == "CFrame" then return CFrame.new(rawget(t, "Position") or vec(0, 0, 0)) end
+		if k == "Size" then return vec(4, 1, 2) end
+	end
 	for _, c in rawget(t, "children") do if c.Name == k then return c end end
 	return nil
 end
@@ -205,6 +243,7 @@ local ReplicatedStorage = new("ReplicatedStorage")
 local RunService = new("RunService", "RunService")
 RunService.Heartbeat = newSignal()
 local Workspace = new("Workspace", "Workspace")
+Workspace.attrs.WeaponKitDemo = true -- the demo place's switch (the suite tests the demo build; see "demo switch")
 Workspace.Gravity = 196.2
 Workspace.Terrain = { ReadVoxels = function() return {} end }
 local rayCalls = {}
@@ -246,6 +285,13 @@ end
 local CollectionService = {
 	HasTag = function(self, inst, tag) return inst.tags[tag] == true end,
 	AddTag = function(self, inst, tag) inst.tags[tag] = true end,
+	GetTagged = function(self, tag)
+		local found = {}
+		for _, inst in Workspace:GetDescendants() do
+			if inst.tags[tag] then table.insert(found, inst) end
+		end
+		return found
+	end,
 }
 local Services = { Players = Players, ReplicatedStorage = ReplicatedStorage, Workspace = Workspace, CollectionService = CollectionService, RunService = RunService }
 local game = { GetService = function(self, n) return assert(Services[n], "service " .. n) end }
@@ -278,18 +324,19 @@ function require_(inst)
 	return v
 end
 
-local shared = child(ReplicatedStorage, new("Folder", "Shared"))
+local shared = child(ReplicatedStorage, new("Folder", "WeaponKitShared"))
 child(shared, module("Config", "shared/Config"))
 child(shared, module("Weapons", "shared/Weapons"))
 -- The real shot rules (ignoredCharacters), minus the random spread: tests aim exactly where they say.
 require_(child(shared, module("Ballistics", "shared/Ballistics"))).spread = function(d) return d end
-local server = new("Folder", "Server")
+local server = new("Folder", "WeaponKitServer")
 child(server, module("WeaponServer", "server/WeaponServer"))
 child(server, module("PlayerData", "server/PlayerData"))
 child(server, module("RateLimit", "server/RateLimit"))
 child(server, module("Remotes", "server/Remotes"))
 child(server, module("Suspicion", "server/Suspicion"))
 child(server, module("AimStats", "server/AimStats"))
+child(server, module("LagComp", "server/LagComp"))
 child(server, module("Movement", "server/Movement"))
 child(server, module("LabQuery", "server/LabQuery"))
 local vendor = child(server, new("Folder", "Vendor"))
@@ -387,7 +434,7 @@ local Weapons = require_(shared.Weapons)
 local p1 = makePlayer("P1", 1)
 PlayerData.init()
 WeaponServer.init()
-local remotes = ReplicatedStorage.Remotes
+local remotes = ReplicatedStorage.WeaponKitRemotes
 local fireR, reloadR, ammoR, fxR, hitR, rejR = remotes.Fire, remotes.Reload, remotes.AmmoSync, remotes.FireFX, remotes.HitConfirm, remotes.Rejected
 local function fire(player, origin, dir, id) fireR.OnServerEvent:fire(player, origin, dir, id) end
 local function last(remote) local f = remote.fired[#remote.fired]; return f and f.args end

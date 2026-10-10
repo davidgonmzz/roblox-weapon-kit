@@ -59,7 +59,7 @@ end
 
 -- Demo flag off: no Rejected remote and no LabQuery remote exist, reports still count.
 do
-	local remotesFolder = ReplicatedStorage.Remotes
+	local remotesFolder = ReplicatedStorage.WeaponKitRemotes
 	local savedRejected = remotesFolder.Rejected
 	savedRejected.Parent = nil
 	Config.DEMO_CHEAT_PANEL = false
@@ -80,7 +80,7 @@ section("LabQuery: demo-only server view of your own character, rate-limited")
 do
 	local LabQuery = require_(server.LabQuery)
 	LabQuery.init()
-	local query = ReplicatedStorage.Remotes:FindFirstChild("LabQuery")
+	local query = ReplicatedStorage.WeaponKitRemotes:FindFirstChild("LabQuery")
 	check(query ~= nil, "L1: LabQuery exists while the demo flag is on")
 	local pl = makePlayer("PL", 54)
 	eq(query.OnServerInvoke(pl), nil, "L1: no character: nil")

@@ -7,17 +7,41 @@
 -- up is +Y. A Tool is held by its Handle, so the Handle is the grip. Each weapon is a short list
 -- of boxes (BUILDS below); the accent boxes take the weapon's `color`. The barrel carries an
 -- Attachment called "Muzzle" at its tip: the client fires tracers from there.
+--
+-- YOUR OWN MODELS: put a Folder "WeaponKitModels" in ServerStorage with a child named like the
+-- weapon (the key in Weapons.luau, e.g. "Rifle"). It can be
+--   * a Tool with a Handle: used as it is (its Grip too);
+--   * a Model or a Part: held at its pivot, the barrel pointing along the pivot's front (LookVector).
+-- The barrel tip is an Attachment named "Muzzle" (or "TipAttachment", as in Roblox's own weapons
+-- kit); without one the front-most point is used and you get one warning. Every part is made
+-- unanchored, non-colliding, unqueryable and massless and welded to the Handle, and scripts inside
+-- are removed (the kit does the shooting). Weapons without a model keep the built-in boxes.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 
-local Weapons = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Weapons"))
+local Weapons = require(ReplicatedStorage:WaitForChild("WeaponKitShared"):WaitForChild("Weapons"))
 local PlayerData = require(script.Parent.PlayerData)
 
 local Tools = {}
 
 local DARK = Color3.fromRGB(38, 40, 46)
 local STEEL = Color3.fromRGB(78, 82, 92)
+local MODELS_FOLDER = "WeaponKitModels"
+-- The server accepts a shot's start up to 8 studs from the head (WeaponServer ORIGIN_SLACK, more
+-- ahead of a moving shooter); the grip is ~2.6 studs from the head (R15, more on a tall avatar).
+-- A muzzle further than this from the grip gets a warning.
+local MUZZLE_REACH_WARN = 4.5
+
+local warned = {} -- [message] = true: each model problem is reported once per server
+
+local function warnOnce(message: string)
+	if not warned[message] then
+		warned[message] = true
+		warn("[WeaponKit] " .. message)
+	end
+end
 
 -- One box of a weapon: name, size, offset from the Handle's centre, colour ("accent" = the
 -- weapon's own colour), material.
@@ -121,7 +145,141 @@ local function newPart(name: string, size: Vector3, color: Color3, material: Enu
 	return part
 end
 
+local function findAttachment(root: Instance, name: string): Attachment?
+	for _, item in root:GetDescendants() do
+		if item.Name == name and item:IsA("Attachment") and item.Parent and item.Parent:IsA("BasePart") then
+			return item
+		end
+	end
+	return nil
+end
+
+-- The point of the model furthest along the Handle's front (-Z), on the part that reaches it.
+local function frontMost(handle: BasePart, root: Instance): (BasePart, Vector3)
+	local look = handle.CFrame.LookVector
+	local best, bestPart, bestPoint = -math.huge, handle, handle.Position
+	for _, part in root:GetDescendants() do
+		if part:IsA("BasePart") then
+			local cf, size = part.CFrame, part.Size
+			local reach = math.abs(look:Dot(cf.RightVector)) * size.X / 2
+				+ math.abs(look:Dot(cf.UpVector)) * size.Y / 2
+				+ math.abs(look:Dot(cf.LookVector)) * size.Z / 2
+			local front = (part.Position - handle.Position):Dot(look) + reach
+			if front > best then
+				best, bestPart, bestPoint = front, part, part.Position + look * reach
+			end
+		end
+	end
+	return bestPart, bestPoint
+end
+
+local function ensureMuzzle(tool: Tool, handle: BasePart, label: string)
+	local muzzle = findAttachment(tool, "Muzzle")
+	if not muzzle then
+		local tip = findAttachment(tool, "TipAttachment")
+		local holder, point
+		if tip then
+			holder, point = tip.Parent, tip.WorldPosition
+		else
+			holder, point = frontMost(handle, tool)
+			warnOnce(
+				label
+					.. " has no Attachment named Muzzle: tracers start at its front-most point. Add one at the barrel tip."
+			)
+		end
+		muzzle = Instance.new("Attachment")
+		muzzle.Name = "Muzzle"
+		muzzle.Parent = holder
+		muzzle.WorldPosition = point
+	end
+	local reach = (muzzle.WorldPosition - handle.Position).Magnitude
+	if reach > MUZZLE_REACH_WARN then
+		warnOnce(
+			string.format(
+				"%s: the Muzzle is %.1f studs from the grip. The server takes a shot's start up to 8 studs from the head (the grip is ~2.6 from it); shots from further out start at the head (and past 16 studs are flagged 'origin'). Move the Muzzle (or the grip) closer.",
+				label,
+				reach
+			)
+		)
+	end
+end
+
+-- A copy of the developer's model as a ready Tool, or nil (with a warning) if it can't be used.
+local function buildCustom(name: string, source: Instance): Tool?
+	local label = MODELS_FOLDER .. "." .. name
+	local copy = source:Clone()
+	if not copy then
+		warnOnce(label .. " can't be copied (Archivable is off): using the built-in model.")
+		return nil
+	end
+
+	local removed = 0
+	for _, item in copy:GetDescendants() do
+		if item:IsA("LuaSourceContainer") then
+			removed += 1
+			item:Destroy()
+		end
+	end
+	if removed > 0 then
+		warnOnce(string.format("%s: removed %d script(s) inside it (the kit does the shooting).", label, removed))
+	end
+
+	local tool, handle
+	if copy:IsA("Tool") then
+		tool, handle = copy, copy:FindFirstChild("Handle")
+		if not (handle and handle:IsA("BasePart")) then
+			warnOnce(label .. " is a Tool without a part named Handle: using the built-in model.")
+			copy:Destroy()
+			return nil
+		end
+	elseif copy:IsA("Model") or copy:IsA("BasePart") then
+		tool = Instance.new("Tool")
+		handle = newPart("Handle", Vector3.new(0.2, 0.2, 0.2), DARK)
+		handle.Transparency = 1
+		handle.CFrame = copy:GetPivot() -- the grip; its front is the barrel's direction
+		handle.Parent = tool
+		copy.Parent = tool
+	else
+		warnOnce(label .. " must be a Tool, a Model or a Part: using the built-in model.")
+		copy:Destroy()
+		return nil
+	end
+
+	tool.Name = name
+	if tool.ToolTip == "" then
+		tool.ToolTip = Weapons.Defs[name].name
+	end
+	tool.CanBeDropped = false
+	tool.RequiresHandle = true
+	for _, part in tool:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.Anchored = false
+			part.CanCollide = false
+			part.CanQuery = false -- a held gun must never block a bullet
+			part.CanTouch = false
+			part.Massless = true
+			if part ~= handle then
+				local weldTo = Instance.new("WeldConstraint")
+				weldTo.Part0 = handle
+				weldTo.Part1 = part
+				weldTo.Parent = part
+			end
+		end
+	end
+	ensureMuzzle(tool, handle, label)
+	return tool
+end
+
 local function build(name: string): Tool?
+	local folder = ServerStorage:FindFirstChild(MODELS_FOLDER)
+	local source = folder and folder:FindFirstChild(name)
+	if source then
+		local tool = buildCustom(name, source)
+		if tool then
+			return tool
+		end
+	end
+
 	local def = Weapons.Defs[name]
 	local spec = BUILDS[name]
 	if not spec then
@@ -220,7 +378,27 @@ function Tools.init()
 	for _, player in Players:GetPlayers() do
 		onPlayer(player)
 	end
-	print("[WeaponKit] Tools ready (" .. #Weapons.Order .. " weapons)")
+
+	-- A model whose name matches no weapon is never used: say so (a typo, most likely).
+	local folder = ServerStorage:FindFirstChild(MODELS_FOLDER)
+	local custom = 0
+	if folder then
+		for _, child in folder:GetChildren() do
+			if Weapons.Defs[child.Name] then
+				custom += 1
+			else
+				warnOnce(
+					string.format(
+						"%s.%s matches no weapon in Weapons.luau (names: %s), so it is not used.",
+						MODELS_FOLDER,
+						child.Name,
+						table.concat(Weapons.Order, ", ")
+					)
+				)
+			end
+		end
+	end
+	print(string.format("[WeaponKit] Tools ready (%d weapons, %d own models)", #Weapons.Order, custom))
 end
 
 return Tools

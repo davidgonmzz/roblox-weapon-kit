@@ -32,7 +32,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
-local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Shared = ReplicatedStorage:WaitForChild("WeaponKitShared")
 local Config = require(Shared:WaitForChild("Config"))
 local Weapons = require(Shared:WaitForChild("Weapons"))
 local Hud = require(script.Parent.Hud)
@@ -88,7 +88,7 @@ function CheatPanel.start()
 		return
 	end
 	local player = Players.LocalPlayer
-	local remotes = ReplicatedStorage:WaitForChild("Remotes")
+	local remotes = ReplicatedStorage:WaitForChild("WeaponKitRemotes")
 	local fireRemote = remotes:WaitForChild("Fire")
 	local reloadRemote = remotes:WaitForChild("Reload")
 	local ammoRemote = remotes:WaitForChild("AmmoSync")

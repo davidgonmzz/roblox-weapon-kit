@@ -1,0 +1,15 @@
+{
+  "name": "WeaponKit",
+  "tree": {
+    "$className": "Folder",
+    "WeaponKitServer": {
+      "$path": "src/server"
+    },
+    "WeaponKitShared": {
+      "$path": "src/shared"
+    },
+    "WeaponKitClient": {
+      "$path": "src/client"
+    }
+  }
+}

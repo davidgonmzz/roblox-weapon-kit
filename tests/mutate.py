@@ -41,6 +41,17 @@ MUTATIONS = [
      "FIRE_JITTER = 0.1,", "FIRE_JITTER = 0.08,"),
     ("credit banks up (schedule from arrival)", "server/WeaponServer.luau",
      "s.lastShot = math.max(now, s.lastShot + wait)", "s.lastShot = now"),
+    ("rewound shot passes through walls", "server/WeaponServer.luau",
+     "castPast(origin, direction, (endPoint - origin).Magnitude, past)", "castPast(origin, direction, math.huge, past)"),
+    ("rewind keeps the whole history", "server/LagComp.luau",
+     "\t\t\twhile now - times[1] > window do", "\t\t\twhile false do"),
+    ("rewind crosses teleports", "server/LagComp.luau",
+     "> TELEPORT_STEP then", "> math.huge then"),
+    ("rewind ignores turning", "server/LagComp.luau",
+     "cf:PointToObjectSpace(origin), cf:VectorToObjectSpace(direction)", "origin - at, direction"),
+    ("rewind hits anything with a Humanoid", "server/WeaponServer.luau",
+     "\t\t\tif humanoid and canDamage(shooter, model, humanoid) then\n\t\t\t\ttable.insert(list, model)",
+     "\t\t\tif humanoid then\n\t\t\t\ttable.insert(list, model)"),
 ]
 
 results = []

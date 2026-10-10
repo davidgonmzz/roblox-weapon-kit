@@ -18,3 +18,6 @@ tests/sweep_test.luau
 # Local dev helpers (machine-specific paths) and logs
 tools/
 *.log
+
+# Release bundle (attach to the GitHub release, never commit)
+dist/

@@ -1,12 +1,15 @@
 --!nonstrict
 -- Client side of the weapons: input and instant feedback. The server (server/WeaponServer.luau)
 -- validates every shot, rolls its own spread, raycasts and applies damage; this file only
---   * reads input   (hold LMB for full-auto, click for semi/pump, R reload, 1/2/3 switch)
+--   * reads input   (hold LMB for full-auto, click for semi/pump, R reload, 1/2/3 switch;
+--                    gamepad R2 fire, X reload, L1/R1 switch; phone: tap fires, HUD buttons)
 --   * says what it did to the server ("fired from here, this way", with a rising shot id)
 --   * draws feedback at once: tracers, muzzle flash, recoil, crosshair bloom
 --   * shows the server's answers: ammo (AmmoSync), hit markers (HitConfirm), other players' shots (FireFX)
 -- Its fire-rate gate mirrors the server's so a normal player never trips it, but the server
 -- decides. The ammo numbers are predicted locally and corrected by every AmmoSync.
+--
+-- Your own GUI or scripts talk to it through shared/ClientApi.luau (signals + equip/reload).
 --
 -- Public functions (used by CheatPanel to build deliberately bad requests):
 --   WeaponClient.getAim()       -> muzzle position, aim direction of the weapon in hand (or nil)
@@ -20,8 +23,9 @@ local StarterGui = game:GetService("StarterGui")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
-local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Shared = ReplicatedStorage:WaitForChild("WeaponKitShared")
 local Ballistics = require(Shared:WaitForChild("Ballistics"))
+local ClientApi = require(Shared:WaitForChild("ClientApi"))
 local Config = require(Shared:WaitForChild("Config"))
 local Weapons = require(Shared:WaitForChild("Weapons"))
 local Effects = require(script.Parent.Effects)
@@ -67,6 +71,9 @@ local held, heldName, heldDef -- the Tool in hand, its name, its Weapons.luau en
 local muzzleAttachment -- the "Muzzle" Attachment on the barrel
 local heldConnections = {}
 
+local api -- ClientApi's BindableEvents (set in start)
+local announcedWeapon -- the last name sent through WeaponChanged
+
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 rayParams.IgnoreWater = true
@@ -88,12 +95,22 @@ local function isCharacterPart(inst: Instance?): boolean
 	return false
 end
 
+-- The Attachment named "Muzzle" (an own gun model may also have a Part called that).
+local function findMuzzle(tool: Tool): Attachment?
+	for _, item in tool:GetDescendants() do
+		if item.Name == "Muzzle" and item:IsA("Attachment") then
+			return item
+		end
+	end
+	return nil
+end
+
 local function muzzlePosition(): Vector3?
 	if not held then
 		return nil
 	end
 	if not muzzleAttachment then
-		muzzleAttachment = held:FindFirstChild("Muzzle", true)
+		muzzleAttachment = findMuzzle(held)
 	end
 	if muzzleAttachment then
 		return muzzleAttachment.WorldPosition
@@ -125,6 +142,20 @@ local function refreshHud()
 		local st = states[heldName]
 		Hud.setAmmo(st.mag, st.reserve)
 		Hud.setReload(if st.reloading then st.reloadStart else nil)
+	end
+end
+
+local function announceWeapon()
+	if api and heldName ~= announcedWeapon then
+		announcedWeapon = heldName
+		api.WeaponChanged:Fire(heldName)
+	end
+end
+
+local function announceAmmo(name: string)
+	local st = states[name]
+	if api and st then
+		api.AmmoChanged:Fire(name, st.mag, st.reserve, st.reloading)
 	end
 end
 
@@ -186,12 +217,17 @@ local function fire()
 	Effects.kick(def.recoil)
 	Hud.bloom()
 	refreshHud()
+	if api then
+		api.Fired:Fire(heldName)
+	end
+	announceAmmo(heldName)
 	if st.mag <= 0 then
 		requestReload() -- empty: ask for the reload right away
 	end
 end
 
-local function clearHeld()
+-- quiet: a new tool is about to be announced (onEquipped), so don't report "nothing held" first.
+local function clearHeld(quiet: boolean?)
 	for _, connection in heldConnections do
 		connection:Disconnect()
 	end
@@ -201,12 +237,15 @@ local function clearHeld()
 	Hud.setWeapon(nil)
 	Hud.selectSlot(nil)
 	Hud.setReload(nil)
+	if not quiet then
+		announceWeapon()
+	end
 end
 
 local function onEquipped(tool: Tool)
-	clearHeld()
+	clearHeld(true)
 	held, heldName, heldDef = tool, tool.Name, Weapons.Defs[tool.Name]
-	muzzleAttachment = tool:FindFirstChild("Muzzle", true)
+	muzzleAttachment = findMuzzle(tool)
 	table.insert(
 		heldConnections,
 		tool.Activated:Connect(function()
@@ -223,23 +262,62 @@ local function onEquipped(tool: Tool)
 	Hud.setWeapon(heldDef)
 	Hud.selectSlot(heldName)
 	refreshHud()
+	announceWeapon()
 end
 
--- 1 / 2 / 3: take that weapon out, or put it away if it is already in hand.
-local function toggleWeapon(name: string)
+local function aliveHumanoid(): Humanoid?
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not humanoid or humanoid.Health <= 0 then
-		return
+	if humanoid and humanoid.Health > 0 then
+		return humanoid
 	end
-	if heldName == name then
-		humanoid:UnequipTools()
+	return nil
+end
+
+local function equipWeapon(name: string)
+	local humanoid = aliveHumanoid()
+	if not humanoid or heldName == name then
 		return
 	end
 	local backpack = player:FindFirstChildOfClass("Backpack")
 	local tool = backpack and backpack:FindFirstChild(name)
 	if tool and tool:IsA("Tool") then
 		humanoid:EquipTool(tool) -- the server sees the equip and remembers it as the loadout
+	end
+end
+
+local function unequipWeapon()
+	local humanoid = aliveHumanoid()
+	if humanoid then
+		humanoid:UnequipTools()
+	end
+end
+
+-- 1 / 2 / 3: take that weapon out, or put it away if it is already in hand.
+local function toggleWeapon(name: string)
+	if heldName == name then
+		unequipWeapon()
+	else
+		equipWeapon(name)
+	end
+end
+
+-- Gamepad R1 / L1: the next / previous weapon the player has, in Weapons.Order.
+local function cycleWeapon(step: number)
+	local order = Weapons.Order
+	local count = #order
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if count == 0 or not backpack then
+		return
+	end
+	local current = (heldName and table.find(order, heldName)) or (if step > 0 then 0 else count + 1)
+	for i = 1, count do
+		local name = order[(current - 1 + step * i) % count + 1]
+		local tool = backpack:FindFirstChild(name)
+		if name ~= heldName and tool and tool:IsA("Tool") then
+			equipWeapon(name)
+			return
+		end
 	end
 end
 
@@ -283,7 +361,7 @@ function WeaponClient.heldWeapon(): string?
 end
 
 function WeaponClient.start()
-	local remotes = ReplicatedStorage:WaitForChild("Remotes")
+	local remotes = ReplicatedStorage:WaitForChild("WeaponKitRemotes")
 	fireRemote = remotes:WaitForChild("Fire")
 	reloadRemote = remotes:WaitForChild("Reload")
 	local ammoRemote = remotes:WaitForChild("AmmoSync")
@@ -291,17 +369,37 @@ function WeaponClient.start()
 	local hitRemote = remotes:WaitForChild("HitConfirm")
 
 	Effects.start()
-	Hud.start()
+	Hud.start({ toggle = toggleWeapon, reload = requestReload })
 
 	-- Our own weapon bar replaces Roblox's hotbar (which would also react to the number keys).
-	task.spawn(function()
-		for _ = 1, 20 do
-			if pcall(StarterGui.SetCoreGuiEnabled, StarterGui, Enum.CoreGuiType.Backpack, false) then
-				return
+	-- With Config.HUD off the game's own GUI (or Roblox's hotbar) does the switching.
+	if Config.HUD then
+		task.spawn(function()
+			for _ = 1, 20 do
+				if pcall(StarterGui.SetCoreGuiEnabled, StarterGui, Enum.CoreGuiType.Backpack, false) then
+					return
+				end
+				task.wait(0.5)
 			end
-			task.wait(0.5)
-		end
-	end)
+		end)
+	end
+
+	api = ClientApi._attach({
+		equip = equipWeapon,
+		unequip = unequipWeapon,
+		toggle = toggleWeapon,
+		reload = requestReload,
+		held = function()
+			return heldName
+		end,
+		ammo = function(name)
+			local st = states[name]
+			if st then
+				return st.mag, st.reserve, st.reloading
+			end
+			return nil, nil, nil
+		end,
+	})
 
 	player.CharacterAdded:Connect(watchCharacter)
 	if player.Character then
@@ -323,6 +421,21 @@ function WeaponClient.start()
 			requestReload()
 			return
 		end
+		-- Gamepad trigger. Roblox may activate the Tool from it as well: the fire timer stops a double shot.
+		if input.KeyCode == Enum.KeyCode.ButtonR2 then
+			if held then
+				holding = true
+				fire()
+			end
+			return
+		end
+		if not Config.HUD then
+			return
+		end
+		if input.KeyCode == Enum.KeyCode.ButtonR1 or input.KeyCode == Enum.KeyCode.ButtonL1 then
+			cycleWeapon(if input.KeyCode == Enum.KeyCode.ButtonR1 then 1 else -1)
+			return
+		end
 		for index, key in SLOT_KEYS do
 			if input.KeyCode == key then
 				local name = Weapons.Order[index]
@@ -331,6 +444,12 @@ function WeaponClient.start()
 				end
 				return
 			end
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if input.KeyCode == Enum.KeyCode.ButtonR2 then
+			holding = false
 		end
 	end)
 
@@ -357,6 +476,7 @@ function WeaponClient.start()
 			st.reloadStart = now
 		end
 		st.reloading = isReloading == true
+		announceAmmo(name)
 		if name == heldName then
 			refreshHud()
 			if st.mag <= 0 and not st.reloading then
@@ -369,6 +489,7 @@ function WeaponClient.start()
 	hitRemote.OnClientEvent:Connect(function(damage, headshot, killed)
 		if type(damage) == "number" then
 			Hud.hitMarker(damage, headshot == true, killed == true)
+			api.Hit:Fire(damage, headshot == true, killed == true)
 		end
 	end)
 
