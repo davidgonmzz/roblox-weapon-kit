@@ -82,10 +82,22 @@ local RELOAD_HAND = Vector3.new(0, -0.8, 0.3) -- studs, in the gun's space
 
 -- Per stance: how far the torso turns away from the aim (long guns: left shoulder forward, as a
 -- real rifle stance, so both of Roblox's short arms reach the gun), and where the grip sits from
--- the right shoulder in the aim's frame (x right, y up, -z forward). Calibrated in Studio on R15.
+-- the right shoulder in the aim's frame (x right, y up, -z forward), and the points the elbows bend
+-- toward (IK poles), from each shoulder in the upper torso's space (they turn with the torso).
+-- Calibrated in Studio on R15.
 local STANCES = {
-	rifle = { twist = 65, hold = Vector3.new(0.05, -0.85, -0.9) },
-	pistol = { twist = 25, hold = Vector3.new(0.1, -0.3, -1.4) },
+	rifle = {
+		twist = 65,
+		hold = Vector3.new(0.05, -0.85, -0.9),
+		poleRight = Vector3.new(1, -2, 1),
+		poleLeft = Vector3.new(-2, -1, 0),
+	},
+	pistol = {
+		twist = 25,
+		hold = Vector3.new(0.1, -0.3, -1.4),
+		poleRight = Vector3.new(1, -2, 0),
+		poleLeft = Vector3.new(-1.5, -1, 0.5),
+	},
 }
 
 local player = Players.LocalPlayer
@@ -252,6 +264,15 @@ local function attach(character: Model, tool: Tool)
 	rig.rayParams.FilterDescendantsInstances = { character }
 	rig.rayParams.IgnoreWater = true
 	rig.points = gunPoints(tool, handle)
+	local function pole(side: string, offset: Vector3): Attachment
+		local shoulder = upper:FindFirstChild(side .. "ShoulderRigAttachment")
+		local point = Instance.new("Attachment")
+		point.Name = "WeaponKitPole" .. side
+		point.Position = (if shoulder then shoulder.Position else Vector3.zero) + offset
+		point.Parent = upper
+		table.insert(rig.made, point)
+		return point
+	end
 	rig.controls = {
 		-- solved in Priority order: torso, then head, then the gun hand, then the hand on the gun
 		newControl(humanoid, {
@@ -275,6 +296,7 @@ local function attach(character: Model, tool: Tool)
 			ChainRoot = rightArm,
 			EndEffector = gripPoint,
 			Target = hold,
+			Pole = pole("Right", stance.poleRight),
 			Priority = 2,
 		}),
 		newControl(humanoid, {
@@ -282,6 +304,7 @@ local function attach(character: Model, tool: Tool)
 			ChainRoot = leftArm,
 			EndEffector = leftHand,
 			Target = leftGrip,
+			Pole = pole("Left", stance.poleLeft),
 			Priority = 3,
 		}),
 	}

@@ -1,0 +1,21 @@
+{
+  "name": "weapon-kit-dev",
+  "globIgnorePaths": ["**/*.md", "**/*.tmp", "**/*~"],
+  "tree": {
+    "$className": "DataModel",
+    "Workspace": {
+      "$className": "Workspace",
+      "$ignoreUnknownInstances": true,
+      "WeaponKit": {
+        "$path": "install.project.json"
+      }
+    },
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "$ignoreUnknownInstances": true,
+      "WeaponKitDev": {
+        "$path": "tests/studio"
+      }
+    }
+  }
+}
