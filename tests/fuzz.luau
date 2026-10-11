@@ -253,7 +253,7 @@ do
 	-- saturates at ~100K actions (99.8% of all reachable scenarios); 20M found only 4 more, all
 	-- benign. So 1,000,000 here is comfortably past saturation while still running in ~3s: enough
 	-- to certify "1,000,000 randomized attacks, 0 failures" on every CI run without wasting time.
-	-- CI passes a smaller count (build.py <n>) for snappy pushes; the default run is the 1M headline.
+	-- Only tests/mutate.py sets a smaller FUZZ_ITER (speed); CI and the default run use the 1M headline.
 	local ITER = FUZZ_ITER or 200000
 	local seeds = { 1, 7, 42, 1337, 2024 }
 	local total = 0

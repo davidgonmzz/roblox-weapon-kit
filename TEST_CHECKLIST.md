@@ -106,12 +106,12 @@ Pistol in hand, full magazine, standing on the spawn pad or at the firing line u
 38. **Hitbox expander** (at the firing line, dummies in view).
     - Expect: for a moment the nearest dummy's head is a giant ball on YOUR screen only; the result says `this client's own raycast: HIT the giant head`, `damage dealt: 0`, `server flags: none`. The head is normal size again afterwards, and the dummy's health did not change.
 39. **Silent aim** (Pistol is the most reliable; the Rifle works too; the Shotgun refuses with an amber message). Stand at the firing line.
-    - Expect: within about 3 s a burst of shots, each at a different dummy's head. `snap` is flagged at least once (`snap x1` or more). `aim` is flagged once 10 hits in a row are almost all headshots (usually with the Pistol; not guaranteed with the Rifle, whose spread misses heads at range). `rounds spent` is about the number of shots and `damage dealt` is above 0: aim flags never block a shot.
+    - Expect: within about 3 s a burst of shots, each at a different dummy's head. `snap` is flagged at least once (`snap x1` or more). `aim` is flagged once at least 10 hits exist and more than 80% of the last 20 are headshots (usually with the Pistol; not guaranteed with the Rifle, whose spread misses heads at range). `rounds spent` is about the number of shots and `damage dealt` is above 0: aim flags never block a shot.
     - If neither flag shows, move closer to the dummies (the shots must hit) or lower `AIM_SNAP_ANGLE` in Config for the demo.
 40. **Godmode.**
     - Expect: `client: health 1000000 / 1000000`, `server: health 100 / 100 (unchanged)`, `server flags: none`. Afterwards your health bar is normal.
 41. **Remote fuzz.**
-    - Expect: about 210 calls (30 to each of the 7 remotes); the flag list grows (`args`, `rate`, `reload`); the result says `server still answers (LabQuery): it did not choke`. In Output (server side) there are NO red errors. Shooting still works afterwards.
+    - Expect: about 240 calls (30 to each of the 8 remotes); the flag list grows (`args`, `rate`, `reload`); the result says `server still answers (LabQuery): it did not choke`. In Output (server side) there are NO red errors. Shooting still works afterwards.
 42. No spread: with the Rifle, hold fire at the 100-stud dummy.
     - Expect: hits scatter around the head, however steady you hold the crosshair. The client sends only a direction.
 43. Infinite ammo: fire the Pistol until `0 / x`, then click **Reload spam**.
