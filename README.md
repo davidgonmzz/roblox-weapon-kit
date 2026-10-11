@@ -395,7 +395,7 @@ end)
 - Small cheats hide inside the tolerances on purpose (a +30% speed boost, a +25% jump): the defaults prefer a missed small cheat to a false alarm on a laggy honest player.
 - The fire-rate credit (0.1 s) is time, so a faster weapon fits more shots into it: at 900 rpm a burst can open with 2 extra rounds. The average never beats the rpm. During a lag spike that delivers 2-4 shots at once, all but one or two of them are refused (the player sees their ammo corrected); that is the price of never letting a burst through.
 - `fast` is built not to fire on honest players (see "Tests"), but a connection worse than the test model (several lag spikes within 2 s) can still trip it. Weigh it in `onFlag`; do not ban on it alone.
-- No sounds or animations: they need asset IDs, and this kit has none by design.
+- No sounds or animations: they need asset IDs, and this kit has none by design. The holding pose is made in code instead, and at extreme aims the arms can still overlap the body (more on rigs without joint limits; numbers and pictures in `tests/studio/AUDIT.md`). `Config.POSE = false` hands the pose back to your own animations.
 - The range, the lab corner and the dummies are a demo scene; the weapon code does not depend on them.
 
 ## Tests
