@@ -9,13 +9,15 @@
 --   * the upper body and head turn to the aim. Your own aim comes from the camera; other players'
 --     from their character's "WeaponKitAim" attribute (whole degrees, set by the server from the Aim
 --     remote, at most ~10 times a second). Long guns turn the torso so both hands reach the gun;
---   * the right hand goes to a hold point in front of the right shoulder, the left hand to the gun
---     (an Attachment named "LeftGrip" in the model, else a point between the grip and the muzzle);
+--   * the right hand goes to a hold point that swings with the aim around a pivot on the chest (the
+--     chest as actually posed, so joint limits can't leave the grip behind the torso), the left hand
+--     to the gun (an Attachment named "LeftGrip" in the model, else a point between the grip and
+--     the muzzle);
 --   * after the IK has run, the gun is turned in the hand so the barrel lies exactly on the aim
 --     line (the IK alone was 7-33 degrees off in Studio): a local change of the RightGrip weld;
 --   * a recoil kick on every shot (a spring: yours at once, others' from FireFX) and a reload motion
 --     (yours from the ammo state, others' from the "WeaponKitReloading" attribute);
---   * no gun through the body: every frame the gun's corners are tested against THIS avatar's torso
+--   * the gun kept out of the body: every frame the gun's corners are tested against THIS avatar's torso
 --     and head boxes and the hold point is pushed out by the smallest move that clears them, so it
 --     fits any body shape (Rthro, scaled, bulky) without per-avatar tuning. Elbows get IK poles that
 --     keep them out and down, away from the chest;
