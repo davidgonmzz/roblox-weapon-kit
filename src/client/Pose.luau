@@ -65,6 +65,7 @@ local CLEAR_MARGIN = 0.08 -- studs kept between the gun and the body
 local CLEAR_MAX = 1.2 -- studs the body can push the gun at most
 local CLEAR_RATE = 20 -- 1/s: how quickly the push follows
 local CLEAR_RELAX = 2 -- 1/s: how quickly an unneeded push fades
+local CHEST_CLEAR = 0.3 -- studs the grip is kept in front of the chest
 local PISTOL_LENGTH = 1.9 -- studs from grip to muzzle: shorter guns are held like a pistol
 
 -- Recoil kick: a spring (stiffness, damping) on the gun's pitch, in degrees. A shot adds
@@ -81,20 +82,24 @@ local RELOAD_ROLL = 25 -- degrees
 local RELOAD_HAND = Vector3.new(0, -0.8, 0.3) -- studs, in the gun's space
 
 -- Per stance: how far the torso turns away from the aim (long guns: left shoulder forward, as a
--- real rifle stance, so both of Roblox's short arms reach the gun), and where the grip sits from
--- the right shoulder in the aim's frame (x right, y up, -z forward), and the points the elbows bend
--- toward (IK poles), from each shoulder in the upper torso's space (they turn with the torso).
--- Calibrated in Studio on R15.
+-- real rifle stance, so both of Roblox's short arms reach the gun); the pivot the grip swings
+-- around, from the right shoulder in the upper torso's space (x right, y up, -z forward: a rifle's
+-- butt pocket in front of the chest, a pistol's straight arm), and how far ahead of the pivot the
+-- grip sits along the aim; and the points the elbows bend toward (IK poles), from each shoulder in
+-- the upper torso's space (they turn with the torso). Calibrated in Studio on R15 (pivot and reach
+-- keep the straight-ahead grip where the earlier calibration put it).
 local STANCES = {
 	rifle = {
 		twist = 65,
-		hold = Vector3.new(0.05, -0.85, -0.9),
+		pivot = Vector3.new(-0.05, -0.73, -0.71),
+		reach = 0.55,
 		poleRight = Vector3.new(1, -2, 1),
 		poleLeft = Vector3.new(-2, -1, 0),
 	},
 	pistol = {
 		twist = 25,
-		hold = Vector3.new(0.1, -0.3, -1.4),
+		pivot = Vector3.new(0.09, -0.15, -0.35),
+		reach = 1.2,
 		poleRight = Vector3.new(1, -2, 0),
 		poleLeft = Vector3.new(-1.5, -1, 0.5),
 	},
@@ -131,6 +136,14 @@ local function restPoint(character: Model, root: BasePart, upper: BasePart, name
 		return a.Position - b.Position + c.Position - d.Position + e.Position
 	end
 	return root.CFrame:PointToObjectSpace(if e then e.WorldPosition else upper.Position)
+end
+
+-- The right shoulder joint in the upper torso's own space (follows the body's scale).
+local function shoulderPoint(upper: BasePart): Vector3
+	local joint = upper:FindFirstChild("RightShoulderRigAttachment")
+	return if joint and joint:IsA("Attachment")
+		then joint.Position
+		else Vector3.new(upper.Size.X / 2, upper.Size.Y * 0.35, 0)
 end
 
 -- The left hand's spot on the gun: the model's "LeftGrip" Attachment, else one made from the muzzle.
@@ -240,9 +253,9 @@ local function attach(character: Model, tool: Tool)
 		handle = handle,
 		stance = stance,
 		isLocal = character == player.Character,
+		upper = upper,
 		neck = restPoint(character, root, upper, "NeckRigAttachment"),
-		waist = restPoint(character, root, upper, "WaistRigAttachment"),
-		shoulder = restPoint(character, root, upper, "RightShoulderRigAttachment"),
+		shoulder = shoulderPoint(upper),
 		aim = aim,
 		hold = hold,
 		started = os.clock(),
@@ -452,20 +465,20 @@ local function update(rig, now: number, dt: number)
 	local turn = yaw * CFrame.Angles(pitch, 0, 0)
 	rig.aim.Position = rig.neck + turn.LookVector * AIM_DISTANCE
 
-	-- The grip swings with the yaw around the waist and with the pitch around the shoulder.
-	local shoulder = CFrame.new(rig.waist) * yaw * CFrame.new(rig.shoulder - rig.waist)
-	local hold = rig.stance.hold
+	-- The grip swings with the aim around a pivot fixed to the chest as it was posed last frame. The
+	-- real chest, not an ideal one: joint limits (the BallSocketConstraints of Roblox's avatar joint
+	-- upgrade, which IKControls obey) let the torso follow the aim only part of the way, and by a
+	-- different amount on each rig type (Studio: -20 vs -67 degrees at a hard-right aim).
+	local stance = rig.stance
 	local rootCF = rig.root.CFrame
+	local chest = rootCF:ToObjectSpace(rig.upper.CFrame)
+	local pivot = chest * (rig.shoulder + stance.pivot)
 
-	-- A wall in front: how far the barrel would go into it, from the shoulder along the aim.
+	-- A wall in front: how far the barrel would go into it, from the pivot along the aim.
 	local wallTarget = 0
 	if Config.WALL_MODE ~= "off" then
-		local reach = -hold.Z + rig.length + 0.2
-		local hit = Workspace:Raycast(
-			rootCF * shoulder.Position,
-			rootCF:VectorToWorldSpace(turn.LookVector) * reach,
-			rig.rayParams
-		)
+		local reach = stance.reach + rig.length + 0.2
+		local hit = Workspace:Raycast(rootCF * pivot, rootCF:VectorToWorldSpace(turn.LookVector) * reach, rig.rayParams)
 		if hit then
 			wallTarget = reach - hit.Distance
 		end
@@ -475,7 +488,7 @@ local function update(rig, now: number, dt: number)
 	local raise = math.rad(WALL_RAISE * math.clamp(rig.wall - WALL_PULL, 0, 1))
 
 	local dip = math.rad(RELOAD_DIP * reload)
-	local holdFrame = shoulder * CFrame.Angles(pitch - dip + raise, 0, 0)
+	local holdFrame = CFrame.new(pivot) * yaw * CFrame.Angles(pitch - dip + raise, 0, 0)
 
 	-- The body's push (measured on last frame's gun), in the hold's own space, eased and capped. With
 	-- nothing to push, it relaxes slowly so the gun drifts back to its stance and settles just clear.
@@ -488,8 +501,15 @@ local function update(rig, now: number, dt: number)
 	end
 	rig.clear += (pushTarget - rig.clear) * (1 - math.exp(-CLEAR_RATE * dt))
 
+	-- The grip, kept in front of the chest (a very deep or turned torso could still reach it).
 	local back = Vector3.new(0, 0, rig.kick * KICK_BACK + pull)
-	rig.hold.CFrame = holdFrame * CFrame.new(hold + back + rig.clear)
+	local grip = holdFrame * (Vector3.new(0, 0, -stance.reach) + back + rig.clear)
+	local inChest, half = chest:PointToObjectSpace(grip), rig.upper.Size / 2
+	local front = -(half.Z + CHEST_CLEAR)
+	if inChest.Z > front and math.abs(inChest.X) < half.X + CHEST_CLEAR and math.abs(inChest.Y) < half.Y then
+		grip = chest * Vector3.new(inChest.X, inChest.Y, front)
+	end
+	rig.hold.CFrame = holdFrame.Rotation + grip
 	rig.leftControl.Offset = CFrame.new(RELOAD_HAND * reload)
 	rig.gunTurn = turn
 		* CFrame.Angles(math.rad(rig.kick) - dip + raise, 0, 0)
