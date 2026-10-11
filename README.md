@@ -6,6 +6,8 @@
 
 Demo video and playable place: coming soon | [Hire me](#hire-me)
 
+![The exploit lab firing 45 rapid-fire requests: the server refuses 9 and flags them](docs/lab_demo.gif)
+
 ## What you get
 
 - **Three weapons from one data file** - Pistol (semi-auto), Rifle (full-auto), Shotgun (pump, 8 pellets). A new weapon is one table entry.
