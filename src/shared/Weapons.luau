@@ -23,6 +23,7 @@ export type Weapon = {
 	spread: number, -- degrees: half-angle of the random cone the SERVER applies to every pellet
 	recoil: number, -- degrees of camera kick per shot. Client only, never sent to the server
 	color: Color3, -- accent colour of the model, tracers, HUD
+	hold: ("rifle" | "pistol")?, -- how it is held (client/Pose.luau); default: by the gun's length
 }
 
 local DEFS: { [string]: Weapon } = {

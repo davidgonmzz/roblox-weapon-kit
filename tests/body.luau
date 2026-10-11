@@ -44,6 +44,8 @@ V3.__div = function(a, b)
 	return vec(a.X / b.X, a.Y / b.Y, a.Z / b.Z)
 end
 local Vector3 = { new = vec, zero = vec(0, 0, 0), one = vec(1, 1, 1) }
+-- Vector2 rides on the Vector3 table: the test chunk is at Luau's 200-local limit.
+Vector3.vector2 = { new = function(x, y) return setmetatable({ X = x, Y = y }, { __type = "Vector2" }) end }
 -- CFrame: a position plus a rotation matrix R (rows, identity unless built with CFrame.Angles or
 -- composed). `cf + v` moves it (the kit shifts a remembered CFrame that way), `a * b` composes and
 -- `cf * v` maps a point; PointToObjectSpace / VectorToObjectSpace / ToObjectSpace invert it (LagComp).
@@ -317,9 +319,9 @@ local require_
 function require_(inst)
 	if inst.value ~= nil then return inst.value end
 	if cache[inst] ~= nil then return cache[inst] end
-	local f, err = loadstring("local script, os, typeof, require, game, task, Enum, Instance, Vector3, Random, RaycastParams, OverlapParams, warn, Color3, CFrame, Region3 = ...; " .. SOURCES[inst.srcKey], inst.srcKey)
+	local f, err = loadstring("local script, os, typeof, require, game, task, Enum, Instance, Vector3, Random, RaycastParams, OverlapParams, warn, Color3, CFrame, Region3, Vector2 = ...; " .. SOURCES[inst.srcKey], inst.srcKey)
 	assert(f, err)
-	local v = f(inst, fakeOs, typeofMock, require_, rawget(inst, "gameOverride") or game, task, Enum, Instance, Vector3, Random, RaycastParams, OverlapParams, warn, Color3, CFrame, Region3)
+	local v = f(inst, fakeOs, typeofMock, require_, rawget(inst, "gameOverride") or game, task, Enum, Instance, Vector3, Random, RaycastParams, OverlapParams, warn, Color3, CFrame, Region3, Vector3.vector2)
 	cache[inst] = v
 	return v
 end

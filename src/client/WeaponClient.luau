@@ -5,6 +5,7 @@
 --                    gamepad R2 fire, X reload, L1/R1 switch; phone: tap fires, HUD buttons)
 --   * says what it did to the server ("fired from here, this way", with a rising shot id)
 --   * draws feedback at once: tracers, muzzle flash, recoil, crosshair bloom
+--   * starts the holding/aiming pose of every armed character (Pose.luau)
 --   * shows the server's answers: ammo (AmmoSync), hit markers (HitConfirm), other players' shots (FireFX)
 -- Its fire-rate gate mirrors the server's so a normal player never trips it, but the server
 -- decides. The ammo numbers are predicted locally and corrected by every AmmoSync.
@@ -30,6 +31,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local Weapons = require(Shared:WaitForChild("Weapons"))
 local Effects = require(script.Parent.Effects)
 local Hud = require(script.Parent.Hud)
+local Pose = require(script.Parent.Pose)
 
 local WeaponClient = {}
 
@@ -180,7 +182,7 @@ local function fire()
 	local now = os.clock()
 	local def = heldDef
 	local interval = 60 / def.rpm
-	if st.reloading or now - lastShot < math.max(lastInterval, interval) then
+	if st.reloading or now - lastShot < math.max(lastInterval, interval) or Pose.blocked(player.Character) then
 		return
 	end
 	if st.mag <= 0 then
@@ -215,6 +217,7 @@ local function fire()
 	end
 	Effects.muzzleFlash(muzzle, def.color)
 	Effects.kick(def.recoil)
+	Pose.kick(player.Character, def.recoil)
 	Hud.bloom()
 	refreshHud()
 	if api then
@@ -370,6 +373,7 @@ function WeaponClient.start()
 
 	Effects.start()
 	Hud.start({ toggle = toggleWeapon, reload = requestReload })
+	Pose.start()
 
 	-- Our own weapon bar replaces Roblox's hotbar (which would also react to the number keys).
 	-- With Config.HUD off the game's own GUI (or Roblox's hotbar) does the switching.
@@ -478,6 +482,7 @@ function WeaponClient.start()
 		st.reloading = isReloading == true
 		announceAmmo(name)
 		if name == heldName then
+			Pose.reload(player.Character, if st.reloading then st.reloadStart else nil)
 			refreshHud()
 			if st.mag <= 0 and not st.reloading then
 				requestReload() -- magazine empty: the hint to reload
@@ -494,10 +499,13 @@ function WeaponClient.start()
 	end)
 
 	-- Someone else's shot (never your own: the server doesn't echo it back).
-	fxRemote.OnClientEvent:Connect(function(weaponName, origin, ends, hits)
+	fxRemote.OnClientEvent:Connect(function(weaponName, origin, ends, hits, shooter)
 		local def = if type(weaponName) == "string" then Weapons.Defs[weaponName] else nil
 		if not def or typeof(origin) ~= "Vector3" or type(ends) ~= "table" or type(hits) ~= "table" then
 			return
+		end
+		if typeof(shooter) == "Instance" and shooter:IsA("Player") then
+			Pose.kick(shooter.Character, def.recoil)
 		end
 		Effects.muzzleFlash(origin, def.color)
 		for i = 1, math.min(#ends, 16) do

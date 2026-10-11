@@ -23,7 +23,10 @@
 --   Reload     client -> server: ()
 --   AmmoSync   server -> the shooter: (weapon, mag, reserve, reloading, lastShotId), after every
 --                ammo change and when a weapon is equipped (mag 0 = a hint to reload)
---   FireFX     server -> other nearby players: (weapon, origin, endPoints, hitFlags)
+--   FireFX     server -> other nearby players: (weapon, origin, endPoints, hitFlags, shooter)
+--   Aim        client -> server: (pitch, yaw) in degrees, ~10 times a second at most. Cosmetic only:
+--                copied (rounded) to the character's "WeaponKitAim" attribute so other clients can
+--                pose the shooter (client/Pose.luau); no shot ever reads it
 --   HitConfirm server -> the shooter: (damage, headshot, killed), one per shot that hurt someone
 --   Rejected   (made by Suspicion.luau) server -> the shooter, demo only (Config.DEMO_CHEAT_PANEL):
 --                (reason, reasonCount, totalCount) for every flag the server counted
@@ -86,11 +89,13 @@ local reloadRemote = Remotes.event("Reload")
 local ammoRemote = Remotes.event("AmmoSync")
 local fxRemote = Remotes.event("FireFX")
 local hitRemote = Remotes.event("HitConfirm")
+local aimRemote = Remotes.event("Aim")
 
 -- Flood guards only: the real fire-rate rule is the interval check in onFire. Human limit is
 -- ~10 shots/s (rifle, 600 rpm); a burst of 14 absorbs a lag spike delivering shots together.
 local fireLimit = RateLimit.new(14, 14)
 local reloadLimit = RateLimit.new(3, 4)
+local aimLimit = RateLimit.new(15, 15) -- the client sends at most 10 a second
 
 local rng = Random.new()
 local rayParams = RaycastParams.new()
@@ -144,6 +149,14 @@ local function sendAmmo(player: Player, s, weapon: string)
 	local mag = if data then data.mags[weapon] else 0
 	local reserve = if data then data.reserve[weapon] else 0
 	ammoRemote:FireClient(player, weapon, mag, reserve, s.reloading == weapon, s.lastId)
+end
+
+-- Other clients play the reload motion from this character attribute (client/Pose.luau).
+local function showReloading(player: Player, on: boolean)
+	local character = player.Character
+	if character then
+		character:SetAttribute("WeaponKitReloading", if on then true else nil)
+	end
 end
 
 -- Mirrors the saved stats to Player attributes so the HUD can read them without a remote.
@@ -326,7 +339,7 @@ local function broadcastFx(shooter: Player, weaponName: string, origin: Vector3,
 		if other ~= shooter then
 			local root = other.Character and other.Character:FindFirstChild("HumanoidRootPart")
 			if root and (root.Position - origin).Magnitude <= FX_RANGE then
-				fxRemote:FireClient(other, weaponName, origin, ends, hits)
+				fxRemote:FireClient(other, weaponName, origin, ends, hits, shooter)
 			end
 		end
 	end
@@ -549,11 +562,13 @@ local function onReload(player: Player)
 	s.reloadToken += 1
 	local token = s.reloadToken
 	sendAmmo(player, s, weaponName)
+	showReloading(player, true)
 	task.delay(weapon.reloadTime, function()
 		if states[player] ~= s or s.reloadToken ~= token or s.reloading ~= weaponName then
 			return -- left, respawned, put the weapon away or otherwise cancelled
 		end
 		s.reloading = nil
+		showReloading(player, false)
 		local current = PlayerData.get(player)
 		local _, stillHeld = holder(player)
 		if current and stillHeld == weaponName then
@@ -565,6 +580,22 @@ local function onReload(player: Player)
 		end
 		sendAmmo(player, s, weaponName)
 	end)
+end
+
+-- The aim other players see. Flood-limited and range-checked, then rounded to whole degrees (fewer
+-- attribute changes to replicate). A cheater can only make their own character look elsewhere.
+local function onAim(player: Player, pitch, yaw)
+	if
+		not aimLimit:allow(player)
+		or not RateLimit.isNumber(pitch, -90, 90)
+		or not RateLimit.isNumber(yaw, -180, 180)
+	then
+		return
+	end
+	local character = player.Character
+	if character then
+		character:SetAttribute("WeaponKitAim", Vector2.new(math.round(pitch), math.round(yaw)))
+	end
 end
 
 -- A new life: any reload from the last life is cancelled and the fire timer starts fresh.
@@ -588,6 +619,7 @@ local function onCharacter(player: Player, character: Model)
 		if states[player] == s and s.reloading == child.Name and child:IsA("Tool") then
 			s.reloading = nil
 			s.reloadToken += 1
+			showReloading(player, false)
 			sendAmmo(player, s, child.Name)
 		end
 	end)
@@ -634,6 +666,7 @@ end
 function WeaponServer.init()
 	fireRemote.OnServerEvent:Connect(onFire)
 	reloadRemote.OnServerEvent:Connect(onReload)
+	aimRemote.OnServerEvent:Connect(onAim)
 	RunService.Heartbeat:Connect(function()
 		local window = Config.ANTI_CHEAT.REWIND_TIME
 		if window > 0 then

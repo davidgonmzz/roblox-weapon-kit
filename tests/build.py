@@ -27,7 +27,7 @@ for k, p in srcs.items():
     t = open(os.path.join(root, p), encoding="utf-8").read()
     assert "]=====]" not in t
     out.append('SOURCES["%s"] = [=====[\n%s]=====]' % (k, t))
-for part in ("body.luau", "new_tests.luau", "wrapper_tests.luau", "integration_tests.luau", "lagcomp_tests.luau", "fuzz.luau"):
+for part in ("body.luau", "new_tests.luau", "wrapper_tests.luau", "integration_tests.luau", "lagcomp_tests.luau", "fuzz.luau", "pose_tests.luau"):
     out.append(open(os.path.join(here, part), encoding="utf-8").read())
 out.append('print(string.format("done: %d passed, %d failed", passes, failures))')
 

@@ -13,7 +13,9 @@
 --   * a Tool with a Handle: used as it is (its Grip too);
 --   * a Model or a Part: held at its pivot, the barrel pointing along the pivot's front (LookVector).
 -- The barrel tip is an Attachment named "Muzzle" (or "TipAttachment", as in Roblox's own weapons
--- kit); without one the front-most point is used and you get one warning. Every part is made
+-- kit); without one the front-most point is used and you get one warning. An Attachment named
+-- "LeftGrip" marks where the left hand holds it (client/Pose.luau; without one it is placed between the
+-- grip and the muzzle). Every part is made
 -- unanchored, non-colliding, unqueryable and massless and welded to the Handle, and scripts inside
 -- are removed (the kit does the shooting). Weapons without a model keep the built-in boxes.
 
@@ -33,6 +35,10 @@ local MODELS_FOLDER = "WeaponKitModels"
 -- ahead of a moving shooter); the grip is ~2.6 studs from the head (R15, more on a tall avatar).
 -- A muzzle further than this from the grip gets a warning.
 local MUZZLE_REACH_WARN = 4.5
+-- The built-in boxes are drawn at this scale: real-gun proportions next to a standard R15 avatar, so
+-- both hands reach the gun and the stock stops at the shoulder instead of going through the chest
+-- (client/Pose.luau; Studio-measured clipping).
+local BUILT_IN_SCALE = 0.7
 
 local warned = {} -- [message] = true: each model problem is reported once per server
 
@@ -48,7 +54,8 @@ end
 type Box = { name: string, size: Vector3, offset: Vector3, color: any, material: Enum.Material? }
 
 -- Handle (the grip) is built separately; these sit on top of / around it.
-local BUILDS: { [string]: { grip: Vector3, boxes: { Box }, muzzle: Vector3 } } = {
+-- leftGrip: where the left hand holds the gun (client/Pose.luau), in the Handle's space.
+local BUILDS: { [string]: { grip: Vector3, boxes: { Box }, muzzle: Vector3, leftGrip: Vector3? } } = {
 	Pistol = {
 		grip = Vector3.new(0.35, 1, 0.5),
 		boxes = {
@@ -74,6 +81,7 @@ local BUILDS: { [string]: { grip: Vector3, boxes: { Box }, muzzle: Vector3 } } =
 			{ name = "Sight", size = Vector3.new(0.12, 0.12, 0.2), offset = Vector3.new(0, 1.0, -1.3), color = DARK },
 		},
 		muzzle = Vector3.new(0, 0.7, -1.95),
+		leftGrip = Vector3.new(-0.3, -0.25, 0), -- cupping the right hand
 	},
 	Rifle = {
 		grip = Vector3.new(0.4, 0.9, 0.5),
@@ -96,6 +104,7 @@ local BUILDS: { [string]: { grip: Vector3, boxes: { Box }, muzzle: Vector3 } } =
 			},
 		},
 		muzzle = Vector3.new(0, 0.85, -3.7),
+		leftGrip = Vector3.new(0, 0.35, -1.6), -- under the front of the body
 	},
 	Shotgun = {
 		grip = Vector3.new(0.4, 0.9, 0.5),
@@ -118,10 +127,12 @@ local BUILDS: { [string]: { grip: Vector3, boxes: { Box }, muzzle: Vector3 } } =
 			{ name = "Pump", size = Vector3.new(0.5, 0.4, 1), offset = Vector3.new(0, 0.5, -2.2), color = "accent" },
 		},
 		muzzle = Vector3.new(0, 0.82, -3.7),
+		leftGrip = Vector3.new(0, 0.25, -2.1), -- on the pump
 	},
 }
 
 local function weld(handle: BasePart, part: BasePart, offset: Vector3)
+	offset *= BUILT_IN_SCALE
 	part.CFrame = handle.CFrame * CFrame.new(offset)
 	local w = Instance.new("Weld")
 	w.Part0 = handle
@@ -304,14 +315,14 @@ local function build(name: string): Tool?
 	tool.CanBeDropped = false
 	tool.RequiresHandle = true
 
-	local handle = newPart("Handle", spec.grip, DARK)
+	local handle = newPart("Handle", spec.grip * BUILT_IN_SCALE, DARK)
 	handle.CFrame = CFrame.new(0, 10, 0) -- (any place; parts are positioned relative to it)
 	handle.Parent = tool
 
 	local barrel: BasePart? = nil
 	for _, box in spec.boxes do
 		local color = if box.color == "accent" then def.color else box.color
-		local part = newPart(box.name, box.size, color, box.material)
+		local part = newPart(box.name, box.size * BUILT_IN_SCALE, color, box.material)
 		weld(handle, part, box.offset)
 		part.Parent = tool
 		if box.name == "Barrel" then
@@ -323,8 +334,14 @@ local function build(name: string): Tool?
 	local holder = barrel or handle
 	local muzzle = Instance.new("Attachment")
 	muzzle.Name = "Muzzle"
-	muzzle.CFrame = holder.CFrame:ToObjectSpace(handle.CFrame * CFrame.new(spec.muzzle))
+	muzzle.CFrame = holder.CFrame:ToObjectSpace(handle.CFrame * CFrame.new(spec.muzzle * BUILT_IN_SCALE))
 	muzzle.Parent = holder
+	if spec.leftGrip then
+		local left = Instance.new("Attachment")
+		left.Name = "LeftGrip"
+		left.Position = spec.leftGrip * BUILT_IN_SCALE
+		left.Parent = handle
+	end
 	return tool
 end
 

@@ -35,6 +35,22 @@ local Config = {
 	-- and functions in WeaponKitShared.ClientApi (equip / reload / AmmoChanged / Hit ...).
 	HUD = true,
 
+	-- false: no procedural holding/aiming pose (client/Pose.luau): characters keep Roblox's normal
+	-- tool pose, or your own animations. true: both hands on the gun, the upper body follows the aim,
+	-- recoil kick and a reload motion, seen by every player.
+	POSE = true,
+
+	-- With POSE on, near a wall: "pullback" slides the gun back toward the body and then tilts it up so
+	-- the barrel doesn't go into the wall (looks only); "block" does the same AND the gun can't fire
+	-- while it is tilted up (tactical; checked on the shooter's client - the server never needed it:
+	-- a shot from behind a wall already starts at the head); "off" lets the barrel go into walls (arcade).
+	WALL_MODE = "pullback",
+
+	-- With POSE on: standing still, the legs turn toward the aim once it is more than 60 degrees left
+	-- or 25 right of them, so the upper body never twists further than looks natural. false: the legs
+	-- stay put and the upper body stops turning at 75 degrees.
+	TURN_IN_PLACE = true,
+
 	-- DataStore name used by ProfileStore. Bump the suffix to start everybody on fresh data.
 	DATASTORE_NAME = "WeaponKit_v1",
 
