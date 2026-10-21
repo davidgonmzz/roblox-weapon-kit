@@ -131,6 +131,76 @@ Blind spots: the no-limits case is a proxy (constraints destroyed on a joint-upg
 real Motor6D rig; Workspace's avatar joint setting is not script-readable and was not switched.
 One blocky avatar, anchored, solo.
 
+## Both hands on the gun, every avatar (v0.1.1): 2026-10-20, Studio solo Play
+
+Bug (user's recording, their blocky R15 avatar): the left hand floated 1.25-1.39 studs off the gun.
+Cause, measured: reach. The rifle's left spot was 2.95 studs from the left shoulder, the arm (shoulder
+to hand) 1.84 long. The stance numbers had been calibrated on rigs where Roblox's joint limits held
+the waist to 20 degrees of turn, so the rifle's 65-degree stance never actually happened.
+
+Method: `A.matrix` (pose_audit.luau) with `rig_server.luau` swapping the player's avatar for each rig
+(HumanoidDescription scales on the default body, R6, the player's own avatar, and that avatar with
+every joint turned into a Motor6D = a rig without the avatar joint upgrade). Each rig x Pistol /
+Rifle / Shotgun x pitch -60..60 x yaw -60..60 (5 x 5), root anchored, 0.6 s settle, 1 sample per
+aim. Same grid for v0.1.0 (e30c7f6's Pose.luau pasted in) and v0.1.1. Hands: right = grip
+attachment to the hold target; left = to its target (v0.1.0: hand centre to the model's LeftGrip;
+v0.1.1: palm, the LeftGripAttachment, to WeaponKitLeftGrip); "on gun" = palm to the nearest visible
+gun part. Body metrics: the S2 numbers above (engine geometry, GetPartsInPart).
+
+| Rig | v0.1.0 left hand off (max) | v0.1.1 left / right off (max) | v0.1.1 palm to gun (max) | gun-in-body mean (max), v0.1.0 -> v0.1.1, worst gun | arms-in-body mean (upper / fore), v0.1.0 -> v0.1.1 |
+|---|---|---|---|---|---|
+| user's avatar (blocky, H 1.05, P 0.5) | 2.09-3.16 | 0.01 / 0.01 | 0.18 | 0.2 (2.0) -> 0.0 (0.1) | 4.4-4.6 / 3.3-4.3 -> 6.9-8.9 / 8.6-9.8 |
+| blocky scales, default body | 2.09-3.37 | 0.02 / 0.01 | 0.18 | 0.2 (2.1) -> 0.0 (0.1) | 3.4-4.6 / 3.3-4.1 -> 7.0-11.1 / 8.9-11.4 |
+| default R15 | 1.94-3.31 | 0.01 / 0.01 | 0.18 | 0.1 (2.0) -> 0.0 (0.0) | 3.1-4.7 / 3.4-3.9 -> 6.0-10.3 / 8.1-10.6 |
+| Rthro (BodyType 1) | 2.05-2.88 | 0.07 / 0.03 | 0.18 | 0.2 (4.0) -> 0.0 (0.4) | 2.0-5.3 / 1.4-3.9 -> 3.3-8.8 / 6.5-8.3 |
+| Rthro slender (+ Proportion 1) | 1.82-3.07 | 0.02 / 0.02 | 0.18 | 0.0 (0.0) -> 0.0 (0.5) | 2.0-5.4 / 1.4-3.9 -> 3.3-10.0 / 6.4-9.2 |
+| height 0.9 | 2.36-2.95 | 0.04 / 0.01 | 0.18 | 0.4 (4.6) -> 0.1 (0.8) | 3.5-4.9 / 4.7-5.1 -> 8.3-11.5 / 11.8-14.9 |
+| height 1.05 | 1.71-3.30 | 0.05 / 0.01 | 0.18 | 0.0 (0.3) -> 0.0 (0.0) | 2.8-4.5 / 2.9-3.1 -> 5.6-10.2 / 7.3-10.0 |
+| width 0.7 | 1.59-2.69 | 0.01 / 0.01 | 0.18 | 0.3 (3.3) -> 0.0 (0.0) | 4.0-7.0 / 2.7-4.8 -> 2.2-9.2 / 6.0-8.6 |
+| width 1.0 | 2.03-3.31 | 0.01 / 0.01 | 0.18 | 0.1 (1.5) -> 0.0 (0.0) | 3.0-4.3 / 3.3-3.6 -> 6.7-11.1 / 8.7-11.4 |
+| depth 0.75 | 2.03-3.13 | 0.04 / 0.01 | 0.18 | 0.0 (0.1) -> 0.0 (0.3) | 1.3-2.1 / 1.6 -> 4.3-6.3 / 5.6-6.5 |
+| head 0.95 | 1.81-3.15 | 0.02 / 0.01 | 0.18 | 0.1 (1.8) -> 0.0 (0.0) | 3.1-5.0 / 3.6-4.2 -> 6.6-10.3 / 8.6-10.6 |
+| R6 (default body) | 3.66-4.90 (no pose: Roblox's tool pose) | 0.09 / 0.00 | 0.18 | 0.0 (0.0) -> 0.2-0.4 (5.8) | 0 / - -> 5.0-8.9 / - |
+| user's avatar, Motor6D joints | (not measured) | 0.02 / 0.01 | 0.18 | - -> 0.0 (0.0) | - -> 7.8-11.1 / 9.9-10.3 |
+
+Barrel vs aim: max 0.82 degrees over all 975 v0.1.1 samples (Rthro rifle), 0.37 or less elsewhere.
+A custom rig the pose doesn't know (R15 with the left hand renamed): no IKControls, Roblox's tool
+pose, 0 errors in the log.
+
+What it took (each step measured on the blocky body before it was kept):
+- Joint limits off on the waist, neck and arms while a gun is out (client only, restored when put
+  away): with them on, the waist stopped at 20 degrees right and the arms 0.5-1.0 stud short of
+  targets well inside their reach.
+- The chest turned by its own LookAt on the waist alone: the old UpperTorso-to-Head LookAt split the
+  turn between waist and neck (20-30 of 65 degrees). A Rotation control on that one-part chain made
+  the whole body NaN.
+- Each arm's reach from the rig's own attachments; fitHands keeps both hand targets inside 0.9 of it
+  (the left hand slides back along the gun first, then the gun moves).
+- The chest stays upright (bending it with the aim's pitch swung the turned chest into the gun:
+  rifle gun-in-body mean 8.4% at 0.8 of the pitch vs 2.1% at 0).
+- The head turned on its neck joint directly, level: a LookAt picked its own roll and from the turned
+  chest rolled the head into the stock when aiming down (8.9-18.6% head-in-gun at pitch -60).
+- The left arm as a Transform IK (palm position and turn): a Position control placed the wrist as if
+  the hand kept its animated turn, and the hand missed by about the wrist-to-palm length (0.13 with
+  the hand's centre as end effector, 0.29-0.44 with the palm). Its target is an Attachment on the
+  root, computed from the hold point (moving it there off the gun changed nothing measurable by
+  itself: 0.34-0.44 before and after; the Transform type fixed it, 0.01).
+- No elbow poles: with the limits off, poles made more arm clipping than none on held-out aims.
+- R6: an IKControl on a one-joint Motor6D chain slid the shoulder instead of turning it (arms came
+  off), so R6 arms are pointed directly; its whole body turns 80 degrees for long guns (at 65 the
+  torso's corner was in the gun's path: 5.8% -> 0.7%).
+
+Verdict: both hands on the gun on every rig, aim and gun tested (left within 0.09 stud of its spot,
+palm within 0.18 of the gun's surface), gun-in-body mean at or below v0.1.0 on every R15 rig
+(single-aim maxima up to 0.8%; the two maxima that rose: slender rifle 0.0 -> 0.5, depth-0.75 rifle
+0.1 -> 0.3). NOT better on two counts: (1) arms crossing the chest overlap the body box about
+twice as much as v0.1.0 (where the left arm hung away from the gun), worst aiming the pistol 60
+degrees down (upper arm / forearm up to ~29%); (2) R6 long guns put 0.2-0.4% of the gun in the body on
+average, up to 5.8% at the capped hard-right-and-down corner (v0.1.0 didn't pose R6 at all).
+Blind spots: anchored and standing (no walk/run/jump), solo (other players see the same code fed by
+the replicated aim, not checked here), no mesh body packages (Rthro here = BodyTypeScale on the
+default body), no layered clothing.
+
 Dev setup: `rojo serve dev.project.json` (Rojo 7.7.1 via rokit) syncs src/ into the place under
 Workspace.WeaponKit and this folder into ReplicatedStorage.WeaponKitDev (dev only, never shipped):
 `require(game.ReplicatedStorage.WeaponKitDev.pose_audit)` in a Play client.

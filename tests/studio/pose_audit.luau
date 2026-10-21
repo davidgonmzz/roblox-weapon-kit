@@ -101,13 +101,77 @@ function A.equip(name)
 	return tool
 end
 
+-- The parts the metrics use, for R15 or R6 (R6: the whole arm counts as "upper arm", from its joint).
+function A.rigParts(char)
+	if char:FindFirstChild("UpperTorso") then
+		local arms = {}
+		for _, side in { "Right", "Left" } do
+			table.insert(arms, {
+				upper = char[side .. "UpperArm"],
+				shoulder = char[side .. "UpperArm"][side .. "ShoulderRigAttachment"].WorldPosition,
+				fore = { char[side .. "LowerArm"], char[side .. "Hand"] },
+			})
+		end
+		return {
+			body = { char.UpperTorso, char.LowerTorso, char.Head },
+			gunArms = { char.RightLowerArm, char.LeftLowerArm, char.RightUpperArm, char.LeftUpperArm },
+			arms = arms,
+			hand = char.RightHand,
+			leftEnd = char.LeftHand.LeftGripAttachment, -- Pose's left IK end effector (the palm)
+		}
+	end
+	local arms = {}
+	for _, side in { "Right", "Left" } do
+		local motor = char.Torso[side .. " Shoulder"]
+		table.insert(
+			arms,
+			{ upper = char[side .. " Arm"], shoulder = (char.Torso.CFrame * motor.C0).Position, fore = {} }
+		)
+	end
+	return {
+		body = { char.Torso, char.Head },
+		gunArms = { char["Right Arm"], char["Left Arm"] },
+		arms = arms,
+		hand = char["Right Arm"],
+		leftEnd = char["Left Arm"].LeftGripAttachment,
+	}
+end
+
+-- Hands vs their IK targets (Pose's WeaponKitHold / WeaponKitLeftGrip attachments) and the left
+-- hand's distance to the nearest visible gun part (0 = touching or inside it).
+function A.hands(tool, rp)
+	local char = p.Character
+	rp = rp or A.rigParts(char)
+	local hold = char.HumanoidRootPart:FindFirstChild("WeaponKitHold")
+	-- (v0.1.1: WeaponKitLeftGrip on the root; v0.1.0's Pose targets the model's own LeftGrip)
+	local lt = char.HumanoidRootPart:FindFirstChild("WeaponKitLeftGrip") or tool:FindFirstChild("LeftGrip", true)
+	local grip = rp.hand:FindFirstChild("RightGripAttachment")
+	local leftPos = if rp.leftEnd:IsA("Attachment") then rp.leftEnd.WorldPosition else rp.leftEnd.Position
+	local best = math.huge
+	for _, part in tool:GetDescendants() do
+		if part:IsA("BasePart") and part.Transparency < 1 then
+			local l, h = part.CFrame:PointToObjectSpace(leftPos), part.Size / 2
+			local q = Vector3.new(math.clamp(l.X, -h.X, h.X), math.clamp(l.Y, -h.Y, h.Y), math.clamp(l.Z, -h.Z, h.Z))
+			best = math.min(best, (l - q).Magnitude)
+		end
+	end
+	return {
+		right = if hold then (grip.WorldPosition - hold.WorldPosition).Magnitude else -1,
+		left = if lt then (leftPos - lt.WorldPosition).Magnitude else -1,
+		leftGun = best,
+	}
+end
+
 -- one sample of every metric for the current pose (tool = nil: baseline)
 function A.sample(tool)
 	local char = p.Character
-	local opBody = A.params({ char.UpperTorso, char.LowerTorso, char.Head })
+	local rp = A.rigParts(char)
+	local opBody = A.params(rp.body)
 	local r = { gunPts = 0, gunIn = 0, gunInArm = 0, upPts = 0, upIn = 0, foPts = 0, foIn = 0 }
 	if tool then
-		local opArms = A.params({ char.RightLowerArm, char.LeftLowerArm, char.RightUpperArm, char.LeftUpperArm })
+		local h = A.hands(tool, rp)
+		r.right, r.left, r.leftGun = h.right, h.left, h.leftGun
+		local opArms = A.params(rp.gunArms)
 		for _, part in tool:GetDescendants() do
 			if part:IsA("BasePart") and part.Transparency < 1 then
 				for _, pt in A.grid(part, 0.08, 40) do
@@ -124,19 +188,18 @@ function A.sample(tool)
 		local g = tool.Handle.CFrame * tool.Grip -- the barrel lies along -Z of this frame
 		r.err = math.deg(math.acos(math.clamp(g.LookVector:Dot(cam.CFrame.LookVector), -1, 1)))
 	end
-	for _, side in { "Right", "Left" } do
+	for _, arm in rp.arms do
 		-- the upper arm's first 0.6 studs from the shoulder joint overlap the torso in any pose: skipped
-		local shoulder = char[side .. "UpperArm"][side .. "ShoulderRigAttachment"].WorldPosition
-		for _, pt in A.grid(char[side .. "UpperArm"], 0.1, 20) do
-			if (pt - shoulder).Magnitude > 0.6 then
+		for _, pt in A.grid(arm.upper, 0.1, 20) do
+			if (pt - arm.shoulder).Magnitude > 0.6 then
 				r.upPts += 1
 				if A.inside(pt, opBody) then
 					r.upIn += 1
 				end
 			end
 		end
-		for _, n in { "LowerArm", "Hand" } do
-			for _, pt in A.grid(char[side .. n], 0.1, 20) do
+		for _, part in arm.fore do
+			for _, pt in A.grid(part, 0.1, 20) do
 				r.foPts += 1
 				if A.inside(pt, opBody) then
 					r.foIn += 1
@@ -147,11 +210,12 @@ function A.sample(tool)
 	r.gunBody = r.gunPts > 0 and r.gunIn / r.gunPts * 100 or 0
 	r.gunArm = r.gunPts > 0 and r.gunInArm / r.gunPts * 100 or 0
 	r.upArm = r.upIn / r.upPts * 100
-	r.fore = r.foIn / r.foPts * 100
+	r.fore = r.foPts > 0 and r.foIn / r.foPts * 100 or 0
 	return r
 end
 
 local METRICS = { "gunBody", "gunArm", "upArm", "fore" }
+local HANDS = { "right", "left", "leftGun" }
 
 function A.pass(name, pitches, yaws, settle)
 	local tool = A.equip(name)
@@ -188,6 +252,15 @@ function A.pass(name, pitches, yaws, settle)
 		maxErr = math.max(maxErr, r.err or 0)
 	end
 	local parts = { string.format("%s n=%d", name, #rows) }
+	for _, m in HANDS do
+		local hmax, hat = -1, ""
+		for _, r in rows do
+			if r[m] and r[m] > hmax then
+				hmax, hat = r[m], string.format("(%d,%d)", r.pitch, r.yaw)
+			end
+		end
+		table.insert(parts, string.format("%s max %.2f %s", m, hmax, hat))
+	end
 	for _, m in METRICS do
 		table.insert(parts, string.format("%s mean %.1f max %.1f %s", m, sum[m] / #rows, max[m], at[m]))
 	end
@@ -248,10 +321,13 @@ function A.capture(name, pitch, yaw)
 		model = A.snapshot(),
 		aimDir = dir,
 		label = string.format(
-			"%s (%d,%d)  gun-in-body %.1f%%  gun-in-arms %.0f%%  upper arm %.0f%%  forearm %.0f%%",
+			"%s %s (%d,%d)  hands R %.2f L %.2f  gun-in-body %.1f%%  gun-in-arms %.0f%%  upper arm %.0f%%  forearm %.0f%%",
+			A.rigName or "",
 			name,
 			pitch,
 			yaw,
+			r.right or -1,
+			r.left or -1,
 			r.gunBody,
 			r.gunArm,
 			r.upArm,
@@ -343,7 +419,7 @@ local function board()
 end
 
 local function target(model)
-	return model.UpperTorso.Position + Vector3.new(0, 0.2, 0)
+	return (model:FindFirstChild("UpperTorso") or model.Torso).Position + Vector3.new(0, 0.2, 0)
 end
 
 -- rows = { A.capture(...), ... } (3 fit one screen): 5 fixed cameras per row
@@ -516,6 +592,61 @@ function A.poleSearch(gun, candR, candL, L0, train, held, settle, repeats, log)
 	end
 	return { R = bestR, L = bestL, score = bestS }
 end
+
+-- Swaps the local player's avatar for a test rig (Studio Play, rig_server.luau running on the server):
+-- spec = { name = "...", r6 = bool?, mine = bool? (start from the player's own avatar), scales = {
+-- HeightScale = 0.9, ... } }. Waits for the new character and its 3 kit weapons, then anchors it.
+function A.useRig(spec)
+	local fn = game:GetService("ReplicatedStorage"):WaitForChild("PoseAuditRig", 5)
+	local old = p.Character
+	fn:InvokeServer(spec)
+	local c = p.Character
+	while c == old or not (c and c:FindFirstChild("HumanoidRootPart")) do
+		task.wait(0.1)
+		c = p.Character
+	end
+	local t0 = os.clock()
+	while #p:WaitForChild("Backpack"):GetChildren() < 3 and os.clock() - t0 < 10 do
+		task.wait(0.2)
+	end
+	task.wait(1)
+	A.rigName = spec.name
+	A.anchor(true)
+	return c
+end
+
+-- Every rig x gun on one aim grid; one summary line per pass to `log`, rows kept in A.results.
+function A.matrix(rigs, guns, pitches, yaws, settle, log)
+	A.results = A.results or {}
+	for _, spec in rigs do
+		A.useRig(spec)
+		for _, g in guns do
+			local line = A.pass(g, pitches, yaws, settle)
+			A.results[spec.name .. "/" .. g] = A.rows[g]
+			log(spec.name .. " " .. line)
+		end
+	end
+end
+
+-- The test rigs of the 10-20 pose fix (body scales of HumanoidDescription; the blocky one is the
+-- user's avatar's scales on the default body).
+A.RIGS = {
+	{ name = "mine", mine = true },
+	{ name = "blocky", scales = { HeightScale = 1.05, ProportionScale = 0.5, BodyTypeScale = 0 } },
+	{ name = "default", scales = {} },
+	{ name = "rthro", scales = { BodyTypeScale = 1 } },
+	{ name = "slender", scales = { BodyTypeScale = 1, ProportionScale = 1 } },
+	{ name = "h0.9", scales = { HeightScale = 0.9 } },
+	{ name = "h1.05", scales = { HeightScale = 1.05 } },
+	{ name = "w0.7", scales = { WidthScale = 0.7 } },
+	{ name = "w1.0", scales = { WidthScale = 1 } },
+	{ name = "d0.75", scales = { DepthScale = 0.75 } },
+	{ name = "head0.95", scales = { HeadScale = 0.95 } },
+	{ name = "R6", r6 = true },
+	{ name = "motor6d", mine = true, motor6d = true },
+}
+-- not in A.matrix (the metrics need R15 or R6 part names): A.useRig(A.CUSTOM) checks the fallback
+A.CUSTOM = { name = "custom", custom = true }
 
 function A.clear()
 	local gui = p.PlayerGui:FindFirstChild("PoseAuditSheet")
