@@ -196,7 +196,7 @@ local Config = {
 		FAST_FLAG_WINDOW = 2,
 
 		-- moving targets (server/LagComp.luau): every player sees the rest of the world a little in the past
-		-- (measured in Studio at zero ping: a moving target shows 0.2-0.35 s behind the server; a real server
+		-- (measured in Studio at zero ping: a moving target shows 0.2-0.33 s behind the server; a real server
 		-- adds the shooter's ping on top), so a shot aimed dead at a running target reaches the server after
 		-- the target has moved on. When the server's ray misses every target where it stands NOW, the same ray
 		-- (same spread, stopped by the same walls) is tested against where each target stood during the last

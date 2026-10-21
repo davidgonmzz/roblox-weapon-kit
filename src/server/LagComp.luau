@@ -1,6 +1,6 @@
 --!nonstrict
 -- Lag compensation: where targets WERE. Every player sees the rest of the world a little in the past
--- (measured in Studio at zero ping: a moving target shows 0.2-0.35 s behind the server; a real server
+-- (measured in Studio at zero ping: a moving target shows 0.2-0.33 s behind the server; a real server
 -- adds the shooter's ping), so a shot aimed dead at a running target reaches the server after the
 -- target has moved on, and the server's ray misses it. This keeps a short history of every target's
 -- root CFrame. When a server ray misses all targets where they stand NOW, WeaponServer asks castPast
