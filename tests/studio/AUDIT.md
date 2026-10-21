@@ -190,6 +190,18 @@ What it took (each step measured on the blocky body before it was kept):
   off), so R6 arms are pointed directly; its whole body turns 80 degrees for long guns (at 65 the
   torso's corner was in the gun's path: 5.8% -> 0.7%).
 
+Aim from the crosshair (added after a frame review of the user's two v0.1.0 recordings, 126 frames,
+by a second session): in third person the default camera looks down at the character, and the pose
+took its pitch from the camera, so the body hunched and the gun pointed below the tracers (shots go
+from the muzzle to the spot under the crosshair). Now the local player's aim is the neck-to-
+crosshair-spot direction, and the barrel's own line is turned through that spot (camera direction
+when the spot is under 2 studs away or behind). Studio check with the crosshair spot set directly
+(scratch-place test hook; the window was minimized, so the real mouse ray was unusable), camera 15
+degrees down: a level target 30 studs ahead now gives a level barrel (pitch 1-2 degrees, was -15);
+over 5 spots per gun (level, ground, high-left, right 40, 4 studs away) the barrel's line passes within
+0.01 stud of the spot (at most 0.17 degrees), hands within 0.05; a spot behind falls back to the
+camera's line; 0 errors.
+
 Verdict: both hands on the gun on every rig, aim and gun tested (left within 0.09 stud of its spot,
 palm within 0.18 of the gun's surface), gun-in-body mean at or below v0.1.0 on every R15 rig
 (single-aim maxima up to 0.8%; the two maxima that rose: slender rifle 0.0 -> 0.5, depth-0.75 rifle

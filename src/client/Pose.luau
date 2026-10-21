@@ -8,9 +8,10 @@
 -- solver) and a few joints turned directly. Nothing here is sent per frame and nothing here can change
 -- a shot:
 --   * the chest turns to the aim (long guns with the left shoulder forward, as a rifle stance; past
---     the waist's turn the hips follow) and the head looks along it. Your own aim comes from the
---     camera; other players' from their character's "WeaponKitAim" attribute (whole degrees, set by
---     the server from the Aim remote, at most ~10 times a second);
+--     the waist's turn the hips follow) and the head looks along it. Your own aim is the spot under
+--     your crosshair (where your shots go); other players' comes from their character's
+--     "WeaponKitAim" attribute (whole degrees, set by the server from the Aim remote, at most ~10
+--     times a second);
 --   * the right hand goes to a hold point that swings with the aim around a pivot on the chest (the
 --     chest as actually posed), the left hand to the gun (an Attachment named "LeftGrip" in the
 --     model, else a point between the grip and the muzzle);
@@ -19,7 +20,8 @@
 --     are within reach (fitHands). For that the waist, neck and arm joint limits are off while the
 --     gun is out (this client only);
 --   * after the IK has run, the gun is turned in the hand so the barrel lies exactly on the aim
---     line (the IK alone was 7-33 degrees off in Studio): a local change of the RightGrip weld;
+--     line (the IK alone was 7-33 degrees off in Studio): a local change of the RightGrip weld. Your
+--     own barrel's line goes through the crosshair spot, so your tracers leave along it;
 --   * a recoil kick on every shot (a spring: yours at once, others' from FireFX) and a reload motion
 --     (yours from the ammo state, others' from the "WeaponKitReloading" attribute);
 --   * the gun kept out of the body: every frame the gun's corners are tested against THIS avatar's torso
@@ -34,7 +36,7 @@
 -- Measured in Studio over 13 rigs x 3 guns x 25 aims: tests/studio/AUDIT.md.
 --
 -- Public functions (WeaponClient calls them):
---   Pose.start()
+--   Pose.start(crosshair)                 crosshair() -> the world spot your shots go to (WeaponClient)
 --   Pose.kick(character, recoil)          a shot: recoil = the weapon's `recoil` stat
 --   Pose.reload(character, startClock?)   the reload started at os.clock() startClock, or ended (nil)
 --   Pose.blocked(character) -> boolean    the gun is tilted up against a wall (WALL_MODE "block": no fire)
@@ -54,6 +56,7 @@ local AIM_ATTRIBUTE = "WeaponKitAim" -- Vector2 (pitch, yaw) in whole degrees, y
 local RELOAD_ATTRIBUTE = "WeaponKitReloading"
 local AIM_DISTANCE = 50 -- studs: how far ahead the chest and hips look
 local PITCH_LIMIT = 80 -- degrees up or down
+local NEAR_AIM = 2 -- studs: a crosshair spot closer than this (or behind) aims along the camera instead
 local YAW_LIMIT = 75 -- degrees the upper body turns away from the legs
 local SEND_INTERVAL = 0.1 -- seconds between two aim updates to the server
 local SEND_STEP = 2 -- degrees: smaller aim changes are not sent
@@ -128,6 +131,7 @@ local rigs = {} -- [character] = the posed rig (see attach)
 local wanted = {} -- [character] = the kit Tool it holds
 local nextTry = {} -- [character] = os.clock() of the next attach attempt
 local aimRemote
+local crosshair: (() -> Vector3)? -- the spot under the local player's crosshair (Pose.start)
 local lastSend, sentPitch, sentYaw = -math.huge, math.huge, math.huge
 
 local function findAttachment(root: Instance, name: string): Attachment?
@@ -287,7 +291,7 @@ end
 -- The left hand's spot on the gun, in the gun's frame G (the RightGripAttachment's frame: the barrel
 -- along -Z, up +Y, as in Roblox's default tool pose; a Handle-space point p sits at G-space
 -- Grip:Inverse() * p): the model's "LeftGrip" Attachment, else a spot made from the muzzle.
-local function leftSpotFor(tool: Tool, handle: BasePart): (Vector3, number)
+local function leftSpotFor(tool: Tool, handle: BasePart): (Vector3, number, Vector3)
 	local muzzle = findAttachment(tool, "Muzzle")
 	local muzzleG = if muzzle
 		then tool.Grip:Inverse() * handle.CFrame:PointToObjectSpace(muzzle.WorldPosition)
@@ -295,12 +299,13 @@ local function leftSpotFor(tool: Tool, handle: BasePart): (Vector3, number)
 	local length = -muzzleG.Z
 	local given = findAttachment(tool, "LeftGrip")
 	if given then
-		return tool.Grip:Inverse() * handle.CFrame:PointToObjectSpace(given.WorldPosition), length
+		return tool.Grip:Inverse() * handle.CFrame:PointToObjectSpace(given.WorldPosition), length, muzzleG
 	end
 	return if length < PISTOL_LENGTH
 		then Vector3.new(-0.3, -0.35, 0.1) -- cupping the right hand
 		else Vector3.new(0, muzzleG.Y * 0.5 - 0.25, muzzleG.Z * 0.55), -- under the barrel
-		length
+		length,
+		muzzleG
 end
 
 -- The points the body is kept away from, in the Handle's space: every visible part's centre and
@@ -373,7 +378,7 @@ local function attach(character: Model, tool: Tool)
 	local upper = body.chest
 
 	local def = Weapons.Defs[tool.Name]
-	local leftSpot, length = leftSpotFor(tool, handle)
+	local leftSpot, length, muzzleG = leftSpotFor(tool, handle)
 	local stance = STANCES[def.hold or (if length < PISTOL_LENGTH then "pistol" else "rifle")]
 
 	local hold = Instance.new("Attachment")
@@ -400,6 +405,8 @@ local function attach(character: Model, tool: Tool)
 		reachL = body.reachL,
 		rigid = body.rigid,
 		leftSpot = leftSpot, -- the left hand's spot on the gun (G frame)
+		muzzleG = muzzleG, -- the muzzle (G frame): the barrel's line runs through it along -Z
+		target = nil, -- the local player's crosshair spot this frame (world), see cameraAim
 		-- its IK target: on the root, where the spot will be once the gun is in the right hand (computed
 		-- from the hold point, so it doesn't depend on where the IK has put the right hand yet)
 		leftGrip = leftGrip,
@@ -508,10 +515,22 @@ local function attach(character: Model, tool: Tool)
 	return rig
 end
 
--- The local player's aim, from the camera, in the legs' frame: pitch up, yaw left (degrees; the yaw
--- is not clamped yet).
-local function cameraAim(root: BasePart): (number, number)
-	local look = root.CFrame:VectorToObjectSpace(Workspace.CurrentCamera.CFrame.LookVector)
+-- The local player's aim in the legs' frame: pitch up, yaw left (degrees; the yaw is not clamped yet).
+-- From the neck to the spot under the crosshair, where the shots go: not the camera's own direction,
+-- which looks down at the character from above (the body then hunched and the gun pointed below the
+-- tracers, user's recording 10-20). A spot too close or behind the neck: the camera's direction.
+local function cameraAim(rig): (number, number)
+	local root = rig.root
+	local look = Workspace.CurrentCamera.CFrame.LookVector
+	rig.target = nil
+	local target = crosshair and crosshair()
+	if target then
+		local toTarget = target - root.CFrame * rig.neck
+		if toTarget.Magnitude > NEAR_AIM and toTarget:Dot(look) > 0 then
+			look, rig.target = toTarget.Unit, target
+		end
+	end
+	look = root.CFrame:VectorToObjectSpace(look)
 	local pitch = math.deg(math.asin(math.clamp(look.Y, -1, 1)))
 	return math.clamp(pitch, -PITCH_LIMIT, PITCH_LIMIT), math.deg(math.atan2(-look.X, -look.Z))
 end
@@ -677,7 +696,7 @@ end
 -- Before the animation step: aim, spring and reload decide where the targets go this frame.
 local function update(rig, now: number, dt: number)
 	if rig.isLocal then
-		local pitch, yaw = cameraAim(rig.root)
+		local pitch, yaw = cameraAim(rig)
 		turnInPlace(rig, yaw, dt)
 		rig.pitch, rig.yaw = pitch, math.clamp(yaw, -YAW_LIMIT, YAW_LIMIT)
 		sendAim(rig.pitch, rig.yaw, now)
@@ -774,14 +793,31 @@ local function update(rig, now: number, dt: number)
 	end
 	local back = Vector3.new(0, 0, rig.kick * KICK_BACK + pull)
 	local grip = keepFront(holdFrame * (Vector3.new(0, 0, -stance.reach) + back + rig.clear))
-	rig.gunTurn = turn
-		* CFrame.Angles(math.rad(rig.kick) - dip + raise, 0, 0)
+	local extra = CFrame.Angles(math.rad(rig.kick) - dip + raise, 0, 0)
 		* CFrame.Angles(0, 0, math.rad(RELOAD_ROLL * reload))
+	rig.gunTurn = turn * extra
 	local slide
 	grip, slide = fitHands(rig, grip, chest, keepFront)
 	if grip ~= grip then
 		rig.clear = Vector3.zero -- a broken (NaN) body this frame: keep last frame's targets, don't let it stick
 		return
+	end
+	if rig.target then
+		-- The barrel's own line through the crosshair spot, from where the gun will be (two passes: the
+		-- muzzle sits off the grip): a shot's tracer then leaves straight along the barrel.
+		local at = rootCF:PointToObjectSpace(rig.target)
+		local gunAim = turn
+		for _ = 1, 2 do
+			local muzzle = grip + gunAim:VectorToWorldSpace(Vector3.new(rig.muzzleG.X, rig.muzzleG.Y, 0))
+			local dir = at - muzzle
+			if dir.Magnitude < NEAR_AIM then
+				break
+			end
+			dir = dir.Unit
+			gunAim = CFrame.Angles(0, math.atan2(-dir.X, -dir.Z), 0)
+				* CFrame.Angles(math.asin(math.clamp(dir.Y, -1, 1)), 0, 0)
+		end
+		rig.gunTurn = gunAim * extra
 	end
 	rig.slide += (slide - rig.slide) * (1 - math.exp(-SLIDE_RATE * dt))
 	local spot = rig.leftSpot
@@ -929,10 +965,11 @@ function Pose.blocked(character: Model?): boolean
 	return rig ~= nil and Config.WALL_MODE == "block" and rig.wall > WALL_PULL + 0.5
 end
 
-function Pose.start()
+function Pose.start(target: (() -> Vector3)?)
 	if not Config.POSE then
 		return
 	end
+	crosshair = target
 	aimRemote = ReplicatedStorage:WaitForChild("WeaponKitRemotes"):WaitForChild("Aim")
 	Players.PlayerAdded:Connect(watchPlayer)
 	for _, other in Players:GetPlayers() do

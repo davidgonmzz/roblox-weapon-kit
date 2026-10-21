@@ -121,16 +121,22 @@ local function muzzlePosition(): Vector3?
 	return handle and handle.Position
 end
 
--- Where the camera's crosshair points, then aim from the muzzle at that spot so the shot lands
--- under the crosshair even though the gun is off to the side.
-local function aimFrom(muzzle: Vector3, range: number): Vector3
+-- The spot under the camera's crosshair (what it points at, up to `range` studs away) and the
+-- crosshair's direction from the camera.
+local function crosshair(range: number): (Vector3, Vector3)
 	local camera = Workspace.CurrentCamera
 	local at = Hud.aimPoint()
 	local ray = camera:ViewportPointToRay(at.X, at.Y)
 	local cameraDirection = ray.Direction.Unit
 	rayParams.FilterDescendantsInstances = ignoreList()
 	local hit = Workspace:Raycast(ray.Origin, cameraDirection * range, rayParams)
-	local target = if hit then hit.Position else ray.Origin + cameraDirection * range
+	return if hit then hit.Position else ray.Origin + cameraDirection * range, cameraDirection
+end
+
+-- Aim from the muzzle at the crosshair's spot, so the shot lands under the crosshair even though the
+-- gun is off to the side.
+local function aimFrom(muzzle: Vector3, range: number): Vector3
+	local target, cameraDirection = crosshair(range)
 	local toTarget = target - muzzle
 	-- Too close, or behind the muzzle (a wall between camera and character): use the camera's line.
 	if toTarget.Magnitude < 0.5 or toTarget:Dot(cameraDirection) <= 0 then
@@ -373,7 +379,10 @@ function WeaponClient.start()
 
 	Effects.start()
 	Hud.start({ toggle = toggleWeapon, reload = requestReload })
-	Pose.start()
+	-- the pose aims the body and the barrel at the same spot the shots go to
+	Pose.start(function()
+		return (crosshair(if heldDef then heldDef.range else 500))
+	end)
 
 	-- Our own weapon bar replaces Roblox's hotbar (which would also react to the number keys).
 	-- With Config.HUD off the game's own GUI (or Roblox's hotbar) does the switching.
