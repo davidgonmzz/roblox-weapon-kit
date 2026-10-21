@@ -65,6 +65,9 @@ local BLEND_TIME = 0.15 -- seconds to blend the pose in after a weapon comes out
 local RETRY_TIME = 0.5 -- seconds between two tries to pose a character that isn't ready yet
 local TURN_LEFT, TURN_RIGHT = 60, -25 -- degrees: past these the legs turn in place (right is the hard side)
 local TURN_RATE = 8 -- 1/s: how quickly the legs catch up
+local STRAFE_FROM = 70 -- degrees: moving with the aim further than this from the legs, the character faces it
+local STRAFE_UNTIL = 50 -- degrees: ...until the aim is back this close to the way it moves
+local BARREL_SLACK = 15 -- degrees the barrel may point past the body's aim to reach the crosshair spot
 local WALL_PULL = 1 -- studs the gun slides back before it starts tilting up
 local WALL_RAISE = 55 -- degrees the gun tilts up when the wall is a further stud closer
 local WALL_RATE = 12 -- 1/s: how quickly the gun follows the wall
@@ -339,6 +342,14 @@ local function newControl(humanoid: Humanoid, props): IKControl
 	return ik
 end
 
+-- Gives the character's turning back to Roblox (see turnToAim).
+local function stopStrafing(rig)
+	if rig.strafing then
+		rig.strafing = false
+		rig.humanoid.AutoRotate = true
+	end
+end
+
 local function detach(character: Model)
 	local rig = rigs[character]
 	if not rig then
@@ -351,6 +362,7 @@ local function detach(character: Model)
 	for joint, limits in rig.freed do
 		joint.LimitsEnabled, joint.TwistLimitsEnabled = limits[1], limits[2]
 	end
+	stopStrafing(rig)
 	local weld = rig.weld
 	if weld and weld.Parent and rig.tool.Parent then
 		weld.C1 = rig.tool.Grip
@@ -535,19 +547,35 @@ local function cameraAim(rig): (number, number)
 	return math.clamp(pitch, -PITCH_LIMIT, PITCH_LIMIT), math.deg(math.atan2(-look.X, -look.Z))
 end
 
--- Standing still with the aim far to the side: turn the legs toward it (only the local player's own
--- character; Roblox already turns a moving character, and a seat or an anchored root decides itself).
-local function turnInPlace(rig, yaw: number, dt: number)
+-- The legs turn toward the aim (only the local player's own character; a seat, an anchored root or a
+-- game that turns the character itself, AutoRotate off, decides itself):
+--   * standing still, once the aim is far to the side (turn in place);
+--   * moving, once the aim is further from the legs than the upper body turns: the character faces
+--     the aim and strafes (AutoRotate off) until the aim is back near the way it moves. Without it,
+--     running toward the camera left the gun at the body's limit, pointing sideways, while the shots
+--     went behind (user's recording, 10-21).
+local function turnToAim(rig, yaw: number, dt: number)
 	local humanoid, root = rig.humanoid, rig.root
-	if
-		not Config.TURN_IN_PLACE
-		or not humanoid.AutoRotate
-		or humanoid.SeatPart
-		or root.Anchored
-		or humanoid.MoveDirection.Magnitude > 0.1
-	then
+	if not Config.TURN_IN_PLACE or not (rig.strafing or humanoid.AutoRotate) or humanoid.SeatPart or root.Anchored then
+		stopStrafing(rig)
 		return
 	end
+	local move = root.CFrame:VectorToObjectSpace(humanoid.MoveDirection)
+	if move.Magnitude > 0.1 then
+		local moveYaw = math.deg(math.atan2(-move.X, -move.Z)) -- the way it moves, from the legs
+		local apart = math.abs((yaw - moveYaw + 180) % 360 - 180)
+		if rig.strafing and apart < STRAFE_UNTIL then
+			stopStrafing(rig)
+		elseif not rig.strafing and math.abs(yaw) > STRAFE_FROM then
+			rig.strafing = true
+			humanoid.AutoRotate = false
+		end
+		if rig.strafing then
+			root.CFrame *= CFrame.Angles(0, math.rad(yaw * math.min(1, TURN_RATE * dt)), 0)
+		end
+		return
+	end
+	stopStrafing(rig)
 	local excess = if yaw > TURN_LEFT then yaw - TURN_LEFT elseif yaw < TURN_RIGHT then yaw - TURN_RIGHT else 0
 	if excess ~= 0 then
 		root.CFrame *= CFrame.Angles(0, math.rad(excess * math.min(1, TURN_RATE * dt)), 0)
@@ -697,7 +725,7 @@ end
 local function update(rig, now: number, dt: number)
 	if rig.isLocal then
 		local pitch, yaw = cameraAim(rig)
-		turnInPlace(rig, yaw, dt)
+		turnToAim(rig, yaw, dt)
 		rig.pitch, rig.yaw = pitch, math.clamp(yaw, -YAW_LIMIT, YAW_LIMIT)
 		sendAim(rig.pitch, rig.yaw, now)
 	else
@@ -817,7 +845,11 @@ local function update(rig, now: number, dt: number)
 			gunAim = CFrame.Angles(0, math.atan2(-dir.X, -dir.Z), 0)
 				* CFrame.Angles(math.asin(math.clamp(dir.Y, -1, 1)), 0, 0)
 		end
-		rig.gunTurn = gunAim * extra
+		-- (a spot beyond the body's turn, say behind it before the legs have turned: the gun stays with
+		-- the body instead of twisting in the hand)
+		if gunAim.LookVector:Dot(turn.LookVector) >= math.cos(math.rad(BARREL_SLACK)) then
+			rig.gunTurn = gunAim * extra
+		end
 	end
 	rig.slide += (slide - rig.slide) * (1 - math.exp(-SLIDE_RATE * dt))
 	local spot = rig.leftSpot

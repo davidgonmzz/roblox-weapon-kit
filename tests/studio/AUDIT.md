@@ -212,6 +212,17 @@ Sheets kept outside git. Hit test with the real mouse crosshair at the screen ce
 Hits 4); the barrel within 0.04 degree of the muzzle-to-crosshair line at pitch -0.5 to -2.2 (no
 hunch); hands 0.00; 0 errors.
 
+Moving away from the aim (user's recording 2026-10-21, 2 min, reviewed as 240 frames at 2 per second):
+running toward the camera, or sideways with the camera still, put the crosshair behind or beside the
+legs; the upper body stopped at its 75-degree turn and the barrel (pointed at the crosshair spot)
+twisted in the hand. Now, with TURN_IN_PLACE on and the aim more than 70 degrees from the legs while
+moving, the character faces the aim and strafes (AutoRotate off) until the aim is back within 50
+degrees of the way it runs; and the barrel never points more than 15 degrees past the body's aim.
+Studio, real key presses (S, D, W, A, 2-2.5 s each) and the real mouse crosshair at the screen centre,
+rifle: within 0.25 s of S the legs faced the aim (2 degrees off), barrel within 0-2.9 degrees of the
+shot line (one 10-17 degree sample while switching), hands within 0.09 / 0.20 while running; W gave
+the turning back to Roblox (AutoRotate on), stopping too; 0 errors.
+
 Verdict: both hands on the gun on every rig, aim and gun tested (left within 0.09 stud of its spot,
 palm within 0.18 of the gun's surface), gun-in-body mean at or below v0.1.0 on every R15 rig
 (single-aim maxima up to 0.8%; the two maxima that rose: slender rifle 0.0 -> 0.5, depth-0.75 rifle

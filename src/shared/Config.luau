@@ -47,8 +47,11 @@ local Config = {
 	WALL_MODE = "pullback",
 
 	-- With POSE on: standing still, the legs turn toward the aim once it is more than 60 degrees left
-	-- or 25 right of them, so the upper body never twists further than looks natural. false: the legs
-	-- stay put and the upper body stops turning at 75 degrees.
+	-- or 25 right of them, so the upper body never twists further than looks natural; moving, with
+	-- the aim more than 70 degrees from the legs (running toward the camera, say), the character
+	-- faces the aim and strafes until the aim is back near the way it runs. Never when your game
+	-- turns the character itself (Humanoid.AutoRotate off). false: the legs stay put and the upper
+	-- body stops turning at 75 degrees.
 	TURN_IN_PLACE = true,
 
 	-- DataStore name used by ProfileStore. Bump the suffix to start everybody on fresh data.
