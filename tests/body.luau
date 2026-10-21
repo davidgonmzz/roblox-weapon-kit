@@ -305,7 +305,17 @@ local OverlapParams = { new = function() return {} end }
 local Color3 = { fromRGB = function() return {} end }
 local Region3 = { new = function(a, b) local r = {}; function r.ExpandToGrid(self) return self end; return r end }
 local warns = {}
-local function warn(...) table.insert(warns, table.concat({ ... }, " ")) end
+-- Movement runs each sample inside pcall and warns the error once: kept here for good (tests clear
+-- `warns`), so the suite fails if a check ever crashed and silently stopped judging (10-21: a probe
+-- that threw on the mock made 4 hover tests fail for the wrong reason).
+MOVEMENT_ERRORS = {} -- a global: the joined test script is at Luau's 200-local limit
+local function warn(...)
+	local text = table.concat({ ... }, " ")
+	table.insert(warns, text)
+	if text:find("^%[WeaponKit%] Movement: ") and text:find(":%d+:") then
+		table.insert(MOVEMENT_ERRORS, text .. " [at " .. (debug.traceback():gsub("%s+", " ")) .. "]")
+	end
+end
 
 ---------------------------------------------------------------- module loader
 local cache = {}

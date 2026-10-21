@@ -425,6 +425,106 @@ do
 		eq(run(newState(), samples), "", "M9: jump spam (hop as soon as you land) while walking is clean")
 	end
 
+	-- M9b: spam jump with the landing BETWEEN samples (Studio 10-21: holding Space flagged "fly" and
+	-- rubber-banded in the demo; the M9 test above only passed because its rhythm caught every
+	-- landing). Space held: a new jump one physics frame after each touchdown, simulated at 240 Hz;
+	-- samples every 0.2 s with up to +-15 ms of timing noise, from 10 starting phases; standing still
+	-- and running. `floorDrop` = how far the feet are above the floor (what the sampler's probes measure).
+	do
+		local function spam(v0, jumpHeight, phase, vx, withFloor, jitter, ping)
+			local samples = {}
+			local y, vy, clock, contact = 3, 0, 0, 0
+			local nextSample, k = 0.2 + phase, 0
+			while clock < 20 do
+				clock += 1 / 240
+				if y <= 3 then
+					contact += 1 / 240
+					if contact >= 1 / 60 then vy, contact = v0, 0 end
+				end
+				vy -= G / 240
+				y += vy / 240
+				if y < 3 then y, vy = 3, 0 end
+				if clock >= nextSample then
+					local above = y - 3
+					local grounded = above <= 2
+					table.insert(samples, mk(clock, vx * clock, y, 0, {
+						grounded = grounded, jumpHeight = jumpHeight, ping = ping or 0.05,
+						floorDrop = if withFloor then above else nil,
+					}))
+					k += 1
+					nextSample = 0.2 + phase + k * 0.2 + (((k * 7919) % 31) / 30 - 0.5) * (jitter or 0.03)
+				end
+			end
+			return samples
+		end
+		local cases = { { 50, 50 * 50 / (2 * G), "JumpPower 50" }, { math.sqrt(2 * G * 7.2), 7.2, "JumpHeight 7.2" } }
+		local oldFlagged = 0
+		for _, case in cases do
+			for _, vx in { 0, 16 } do
+				local bad = {}
+				for i = 0, 9 do
+					local phase = i * 0.02
+					local what = run(newState(), spam(case[1], case[2], phase, vx, true))
+					if what ~= "" then table.insert(bad, string.format("%.2f:%s", phase, what)) end
+					if run(newState(), spam(case[1], case[2], phase, vx, false)) ~= "" then oldFlagged += 1 end
+				end
+				eq(table.concat(bad, " "), "", string.format("M9b: 20 s of held-Space jumping (%s, %s) is clean at all 10 phases", case[3], vx > 0 and "running" or "standing"))
+			end
+		end
+		check(oldFlagged > 0, "M9b: (control) without the floor reading the same jumps ARE flagged (" .. oldFlagged .. " of 40 runs): the test can fail")
+		-- rougher timing (+-40 ms per sample) and a high ping (0.3 s): still clean
+		local rough = {}
+		for _, case in cases do
+			for i = 0, 9 do
+				local what = run(newState(), spam(case[1], case[2], i * 0.02, 16, true, 0.08, 0.3))
+				if what ~= "" then table.insert(rough, string.format("%s %.2f:%s", case[3], i * 0.02, what)) end
+			end
+		end
+		eq(table.concat(rough, " "), "", "M9b: held-Space jumping with +-40 ms sample timing and 0.3 s ping is clean (20 runs)")
+		-- the same rule must not open holes
+		local function air(t, y, over)
+			local s = mk(t, 0, y, 0, { grounded = false, floorDrop = y - 3 })
+			if over then for key, v in over do s[key] = v end end
+			return s
+		end
+		local hover = { mk(0, 0, 3, 0) }
+		for i = 1, 15 do table.insert(hover, air(i * 0.2, 8.5)) end
+		local what, index = run(newState(), hover)
+		check(what == "fly" and index <= 6, "M9b: hovering 5.5 studs over a floor is still flagged fly (" .. what .. " at sample " .. tostring(index) .. ")")
+		local five = { mk(0, 0, 3, 0, { jumpHeight = 50 * 50 / (2 * G) }) }
+		for i = 1, 15 do table.insert(five, air(i * 0.2, 8, { jumpHeight = 50 * 50 / (2 * G) })) end
+		what = run(newState(), five)
+		check(what == "fly", "M9b: hovering 5 studs over a floor is flagged with the default jump (" .. what .. "; up to 4.5 passes: README limits)")
+		for _, smp in hover do smp.ping = 0.4 end
+		what, index = run(newState(), hover)
+		check(what == "fly" and index <= 6, "M9b: ...also with a 0.4 s ping (" .. what .. " at sample " .. tostring(index) .. ")")
+		local gap = { mk(0, 0, 3, 0) }
+		for i = 1, 15 do table.insert(gap, mk(i * 0.2, 0, 6, 0, { grounded = false })) end -- no floor reading
+		what = run(newState(), gap)
+		check(what == "fly", "M9b: hovering 3 studs up over a gap (no floor below) is still flagged (" .. what .. ")")
+		local glide = { mk(0, 0, 3, 0) }
+		for i = 1, 15 do table.insert(glide, air(i * 0.2, 13 - 5 * i * 0.2)) end
+		what = run(newState(), glide)
+		check(what == "fly" or what == "jump", "M9b: a slow glide (-5 studs/s from 10 up) over a floor is still flagged (" .. what .. ")")
+		-- stacked mid-air jumps (infinite jump) with the floor reading on
+		local stacked = { mk(0, 0, 3, 0) }
+		local y, vy, clock, sampleAt, nextJump, jumps = 3, 0, 0, 0.2, 1.0, 0
+		for _ = 1, 600 do
+			clock += 0.01
+			if clock >= nextJump and jumps < 8 then vy = 50; jumps += 1; nextJump += 0.3 end
+			vy -= G * 0.01
+			y += vy * 0.01
+			if y < 3 then y, vy = 3, 0 end
+			if clock >= sampleAt - 1e-9 then
+				local grounded = y <= 5
+				table.insert(stacked, mk(sampleAt, 0, y, 0, { grounded = grounded, floorDrop = y - 3 }))
+				sampleAt += 0.2
+			end
+		end
+		what = run(newState(), stacked)
+		check(what == "jump" or what == "fly", "M9b: 8 stacked mid-air jumps are still flagged with the floor reading on (" .. what .. ")")
+	end
+
 	-- grace, seat, hold
 	do
 		local st = newState()

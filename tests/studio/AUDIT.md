@@ -234,6 +234,34 @@ Blind spots: anchored and standing (no walk/run/jump), solo (other players see t
 the replicated aim, not checked here), no mesh body packages (Rthro here = BodyTypeScale on the
 default body), no layered clothing.
 
+## Spam jump flagged as fly (v0.1.2): 2026-10-21, Studio solo Play + mock suite
+
+Bug (user, after v0.1.1 shipped): "when i jump it rubber bands me often when i spam jump", "while
+moving". Studio, demo place, no gun: holding Space for 6 s gave 3 `fly` flags (listener on the
+`Rejected` remote), each a rubber-band in the demo. Not the pose: no gun was out.
+
+Cause, measured: a held-Space jump touches the ground for about one frame and stays within the
+ground probe's 2 studs for about 0.08 s, while the server samples every 0.2 s, so most landings fall
+between two samples; the next jump was then judged against the first jump's curve. The mock test
+"jump spam while walking is clean" passed only because its rhythm happened to catch every landing:
+a realistic version (240 Hz, a new jump one frame after touchdown, +-15 ms sample timing, 10 phases,
+standing and running, 20 s each) was flagged in 40 of 40 runs on the old code.
+
+Fix (Movement.luau, landedBetween): a landing between two samples counts when, with the server's
+own jump (no tolerance), the body could have fallen from the last height above the floor to the floor
+and jumped back up to this one in the time between them (+0.06 s timing slack, not the ping). Heights
+come from the floor probes; the fall speed is the one the last two heights give under gravity (a lower
+bound on the true speed, so it never invents a fall that fast). No floor under it, no landing.
+
+Checks: the 40 realistic runs are clean, also with +-40 ms timing and a 0.3 s ping; still flagged: a
+5.5-stud hover over a floor (also at a 0.4 s ping), a 3-stud hover over a gap, a slow glide from 10
+studs, 8 stacked mid-air jumps. Studio with the fix: 16 s of held Space (standing, W, D) and 12 s
+with the rifle out (W, S strafing, A): 0 flags; a client BodyPosition hover at 5.5 studs: 2 `fly`
+flags, a client BodyVelocity rise at 10 studs/s: 1. Known price, measured in the mock (25 samples per
+height, 0.25-stud steps): a hover over a floor passes up to 4.5 studs with JumpPower 50 and up to 4.75
+with JumpHeight 7.2; 5 and above is flagged (sample by sample a lower one looks like that jumping).
+README "Limits" says so.
+
 Dev setup: `rojo serve dev.project.json` (Rojo 7.7.1 via rokit) syncs src/ into the place under
 Workspace.WeaponKit and this folder into ReplicatedStorage.WeaponKitDev (dev only, never shipped):
 `require(game.ReplicatedStorage.WeaponKitDev.pose_audit)` in a Play client.

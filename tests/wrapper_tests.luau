@@ -248,9 +248,12 @@ do
 	frames(1)
 	rx.Parent = nil
 	local pb, cb, hb, rb = spawn("W9b", 1090)
+	local errorsBefore = #MOVEMENT_ERRORS
 	rb.AssemblyLinearVelocity = nil -- a part with missing properties: the wrapper must contain the error, not stop the loop
 	frames(3)
 	check(#warns > 0 and warns[#warns]:find("Movement"), "W9: an error in one sample is warned once, not thrown")
+	-- (that error was on purpose: the whole-suite "never crashed" check doesn't count it)
+	while #MOVEMENT_ERRORS > errorsBefore do table.remove(MOVEMENT_ERRORS) end
 	Players.PlayerRemoving:fire(pb)
 	frames(0.5)
 	local pm, cm, hm, rm = spawn("W9c", 1091)

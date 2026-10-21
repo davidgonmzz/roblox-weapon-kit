@@ -67,6 +67,11 @@ local Movement = {}
 
 local LIMITS = Config.ANTI_CHEAT
 local DEFAULT_GRAVITY = 196.2
+-- seconds of timing noise allowed in a landing between samples (landedBetween): the replicated position a
+-- sample reads can be up to a network step old. Not the ping: a steady delay doesn't stretch the time
+-- between two samples, and it would let a laggy hover pass.
+local LANDING_SLACK_TIME = 0.06
+local LANDING_SLACK_HEIGHT = 0.5 -- studs over one jump's height a landing between samples may still explain
 local MAX_COORD = 1e7 -- no real position is farther from the origin than this
 
 ----------------------------------------------------------------------------------- pure half
@@ -98,6 +103,9 @@ function Movement.newState(position: Vector3, time: number)
 		pendingSince = nil,
 		carriedSpeed = 0,
 		push = nil,
+		wasAir = false, -- the last sample was in the air (not held up)
+		prevVy = nil, -- vertical speed at the last sample from the last two floor heights (see landedBetween)
+		prevFloorDrop = nil, -- the last sample's height of the feet above the floor under them, if known
 	}
 end
 
@@ -114,6 +122,7 @@ function Movement.reset(state, position: Vector3, time: number, hold: number?)
 	state.pendingSince = nil
 	state.carriedSpeed = 0
 	state.push = nil
+	state.wasAir, state.prevVy, state.prevFloorDrop = false, nil, nil
 	state.holdUntil = if hold and hold > 0 then time + hold else nil
 end
 
@@ -157,6 +166,7 @@ local function follow(state, sample)
 	state.pendingSince = nil
 	state.carriedSpeed = 0
 	state.push = nil
+	state.wasAir, state.prevVy, state.prevFloorDrop = false, nil, nil
 end
 
 -- The greatest height above the takeoff point that a body launched upwards at speed `v` can be at
@@ -242,6 +252,39 @@ local function crossesBeside(sides, length: number, minDepth: number): boolean
 			return false
 		end
 	end
+	return true
+end
+
+-- A landing between two samples. A jump lasts about half a second and a sample comes every
+-- SAMPLE_INTERVAL, so a player who jumps again the moment they land (spam jump) often touches the
+-- ground between two samples; the second jump was then judged as part of the first and flagged as
+-- "fly" (Studio, 10-21: holding Space gave 3 fly flags in 6 s, and rubber-banded in the demo). It
+-- counts as landed when, with the SERVER's jump (no tolerance), the body could have fallen from the
+-- last sample's height above the floor to the floor and jumped back up to this one in the time
+-- between them. Heights come from the floor probe (sample.floorDrop): no floor under it (a gap), no
+-- landing. A hover is still flagged: at 5.5 studs it would need 0.32 s for that fall and jump, not
+-- 0.2. Then the airtime starts again (returns true).
+local function landedBetween(state, sample, dt: number, gravity: number): boolean
+	local h0, h1 = state.prevFloorDrop, sample.floorDrop
+	if not (state.wasAir and h0 and h1) then
+		return false
+	end
+	local jumpV = math.sqrt(2 * gravity * math.max(sample.jumpHeight, 0))
+	if h1 > jumpV * jumpV / (2 * gravity) + LANDING_SLACK_HEIGHT then
+		return false -- higher than one jump
+	end
+	-- How fast it can have been falling at the last sample, at most: prevVy is the speed the last two
+	-- floor heights give under gravity alone, and it never overstates a fall (had it touched the floor
+	-- in between, it would be rising faster than that); no more than a jump from the floor allows.
+	local most = math.sqrt(math.max(jumpV * jumpV - 2 * gravity * h0, 0))
+	local v = math.clamp(state.prevVy or -most, -most, most)
+	local fall = (v + math.sqrt(v * v + 2 * gravity * h0)) / gravity
+	local climb = jumpV - math.sqrt(math.max(jumpV * jumpV - 2 * gravity * h1, 0)) -- speed lost on the way up
+	if fall + climb / gravity > dt + LANDING_SLACK_TIME then
+		return false
+	end
+	state.airStart = sample.time - climb / gravity
+	state.lastGroundTime = state.airStart
 	return true
 end
 
@@ -349,9 +392,10 @@ function Movement.evaluate(state, sample, limits)
 	end
 
 	-- jump and fly: only while nothing holds the character up.
+	local gravity = math.max(sample.gravity or DEFAULT_GRAVITY, 1)
 	if not supported then
 		local rise = position.Y - state.groundY
-		local gravity = math.max(sample.gravity or DEFAULT_GRAVITY, 1)
+		landedBetween(state, sample, dt, gravity)
 		local jumpLimit = sample.jumpHeight * limits.JUMP_TOLERANCE + limits.JUMP_SLACK
 		local launch = math.sqrt(2 * gravity * jumpLimit) -- the fastest upward speed a jump may start with
 		local best = highestRise(launch, gravity, now - state.airStart, now - state.lastGroundTime)
@@ -417,6 +461,14 @@ function Movement.evaluate(state, sample, limits)
 		state.push = nil
 	end
 
+	-- For the next sample's landedBetween: the feet's height above the floor, and the vertical speed
+	-- the last two heights give under gravity alone (a lower bound, see landedBetween).
+	local floorDrop = sample.floorDrop
+	state.prevVy = if floorDrop and state.prevFloorDrop
+		then (floorDrop - state.prevFloorDrop) / dt - gravity * dt / 2
+		else nil
+	state.wasAir = not supported
+	state.prevFloorDrop = floorDrop
 	state.prev = position
 	state.lastTime = now
 	-- lastGood moves only on a clean sample. In "log" mode nobody is ever put back, so the
@@ -541,7 +593,7 @@ end
 -- character standing on a ledge with its middle over the drop still has floor under part of the box.
 -- It ignores the character's own parts but not other players (standing on a head is legal).
 local GROUND_BOX = 0.2 -- studs: thickness of that box
-local function isStanding(character: Model, humanoid: Humanoid, root: BasePart): (boolean, number)
+local function isStanding(character: Model, humanoid: Humanoid, root: BasePart): (boolean, number, number?)
 	local feet = root.Size.Y / 2 + (if humanoid.RigType == Enum.HumanoidRigType.R6 then 2 else humanoid.HipHeight)
 	groundParams.FilterDescendantsInstances = { character }
 	groundParams.CollisionGroup = root.CollisionGroup
@@ -550,9 +602,21 @@ local function isStanding(character: Model, humanoid: Humanoid, root: BasePart):
 	local drop = Vector3.new(0, -(feet + LIMITS.GROUND_REACH - GROUND_BOX / 2), 0)
 	local hit = Workspace:Blockcast(root.CFrame, box, drop, groundParams)
 	if not hit then
-		return false, 0
+		return false, 0, nil
 	end
-	return true, groundSpeedOf(hit.Instance)
+	return true, groundSpeedOf(hit.Instance), math.max(root.Position.Y - feet - hit.Position.Y, 0)
+end
+
+-- How far below the feet the floor is (studs), looking at most `reach` down; nil if there is none
+-- that close. The same box as isStanding (for landedBetween: a landing needs a floor).
+local function floorBelow(character: Model, humanoid: Humanoid, root: BasePart, reach: number): number?
+	local feet = root.Size.Y / 2 + (if humanoid.RigType == Enum.HumanoidRigType.R6 then 2 else humanoid.HipHeight)
+	groundParams.FilterDescendantsInstances = { character }
+	groundParams.CollisionGroup = root.CollisionGroup
+	local margin = 2 * LIMITS.GROUND_MARGIN
+	local box = Vector3.new(root.Size.X + margin, GROUND_BOX, root.Size.Z + margin)
+	local hit = Workspace:Blockcast(root.CFrame, box, Vector3.new(0, -(feet + reach), 0), groundParams)
+	return if hit then math.max(root.Position.Y - feet - hit.Position.Y, 0) else nil
 end
 
 -- A TrussPart, or a part tagged CLIMB_TAG (or inside a model with that tag: ladders built from
@@ -641,11 +705,15 @@ local function buildSample(
 		return sample
 	end
 
-	sample.grounded, sample.groundSpeed = isStanding(character, humanoid, root)
+	sample.grounded, sample.groundSpeed, sample.floorDrop = isStanding(character, humanoid, root)
 	if not sample.grounded then
 		sample.climbing = isClimbing(character, position)
 		if not sample.climbing then
 			sample.swimming = isSwimming(position)
+		end
+		if not (sample.climbing or sample.swimming) then
+			local reach = sample.jumpHeight * LIMITS.JUMP_TOLERANCE + LIMITS.JUMP_SLACK + LIMITS.GROUND_REACH
+			sample.floorDrop = floorBelow(character, humanoid, root, reach)
 		end
 	end
 

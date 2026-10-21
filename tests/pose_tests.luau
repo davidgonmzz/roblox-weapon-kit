@@ -98,3 +98,6 @@ do
 	tool.Parent = nil
 	eq(#taskErrors, errorsAtStart, "Pose: no task threw an error")
 end
+
+section("Whole suite: the movement checks never crashed")
+eq(#MOVEMENT_ERRORS, 0, "no Movement sample threw an error in the whole run" .. (MOVEMENT_ERRORS[1] and (" (first: " .. MOVEMENT_ERRORS[1] .. ")") or ""))
