@@ -202,6 +202,16 @@ over 5 spots per gun (level, ground, high-left, right 40, 4 studs away) the barr
 0.01 stud of the spot (at most 0.17 degrees), hands within 0.05; a spot behind falls back to the
 camera's line; 0 errors.
 
+Pictures and an on-screen hit test (2026-10-21, final code 967bd0d, Studio window visible): A.sheet
+for all 13 rigs with each gun at a level aim, plus the user's avatar at its worst aims (pistol
+-60,0; rifle 60,60; shotgun -60,-60). Every cell: both hands on the gun (labels: within 0.06 stud)
+and 0% gun-in-body; the long guns read as a bladed rifle stance on R15 and as a cross-body hold on
+R6 (rigid arms); aiming the pistol straight down bunches the arms in front of the chest (21-23%).
+Sheets kept outside git. Hit test with the real mouse crosshair at the screen centre on an R15 dummy
+20 studs ahead, camera 7.6 degrees down: pistol 100 -> 80, rifle 80 -> 52, shotgun 52 -> 0 (server
+Hits 4); the barrel within 0.04 degree of the muzzle-to-crosshair line at pitch -0.5 to -2.2 (no
+hunch); hands 0.00; 0 errors.
+
 Verdict: both hands on the gun on every rig, aim and gun tested (left within 0.09 stud of its spot,
 palm within 0.18 of the gun's surface), gun-in-body mean at or below v0.1.0 on every R15 rig
 (single-aim maxima up to 0.8%; the two maxima that rose: slender rifle 0.0 -> 0.5, depth-0.75 rifle
